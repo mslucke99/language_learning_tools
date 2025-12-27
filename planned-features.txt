@@ -1,4 +1,5 @@
 This is a list of the features that I plan on adding to this app. 
+Here are the ones I am currently strongly considering:
 1. I plan on allowing word definitions to be exported to flashcard decks
 2. I plan on allowing promtps, models, and timeouts to be configurable
 3. Adding follow ups to the grammar explanations to allow the user to explore specific points
@@ -11,4 +12,20 @@ This is a list of the features that I plan on adding to this app.
 8. I might try to add quiz features
 9. example sentence generation based on grammar patterns (after grammar book is added)
 10. Perhaps I can even give the LLMs tool use and allow them to look up what one should know for specific exams for various languages could be
+11. Ability to import and export flashcard decks
+11a. Cross compatibility with Anki
+12. Keyboard shortcuts
+13. Visualizations of the statistics and progress
+14. Images, Audio, and other media support for flashcards
+15. UI localization if other people end up using it and it might be useful to publish
+16. UI options such as dark mode
+17. 
 
+There are some longer-term ideas that I might look into. 
+This is a list intended to just be a place to keep track of them and not necessarily ones that I would work on in the forseeable future.
+- An option to use a custom dictionary that can look up words without relying on the LLM
+- An option to use api-based LLMs
+- Gamification features
+- A much better UI that is built on something better than TKinter
+- Exporting the grammar, sentences, and generated explanations to a file
+- Cloud storage for everything. Possibly using a service like Google Drive
