@@ -5,6 +5,8 @@ from spaced_repetition import get_due_flashcards, get_next_review_date
 from flashcard import Flashcard
 from datetime import datetime
 from ollama_integration import get_ollama_client, is_ollama_available, OllamaThreadedQuery
+from study_manager import StudyManager
+from study_gui import StudyGUI
 
 class FlashcardApp:
     def __init__(self, root):
@@ -16,6 +18,10 @@ class FlashcardApp:
         self.db = FlashcardDatabase()
         self.ollama_client = get_ollama_client()
         self.ollama_available = is_ollama_available()
+        
+        # Initialize study manager
+        self.study_manager = StudyManager(self.db, self.ollama_client)
+        self.study_gui = StudyGUI(self.root, self.db, self.study_manager)
         
         self.current_deck_id = None
         self.current_flashcards = []
@@ -62,6 +68,10 @@ class FlashcardApp:
         # Create deck button - LARGER
         create_btn = ttk.Button(frame, text="Create New Deck", command=self.create_deck_dialog, style="Large.TButton")
         create_btn.pack(pady=15, fill="x", ipady=10)
+        
+        # Study Center button - NEW!
+        study_btn = ttk.Button(frame, text="🎓 Study Center", command=self.open_study_center, style="Large.TButton")
+        study_btn.pack(pady=15, fill="x", ipady=10)
         
         # Deck list
         list_label = ttk.Label(frame, text="Your Decks:", font=("Arial", 13, "bold"))
@@ -593,7 +603,11 @@ Average Interval: {avg_interval:.1f} days
             deck_id = next(d["id"] for d in decks if d["name"] == deck_name)
             self.db.delete_deck(deck_id)
             messagebox.showinfo("Success", "Deck deleted!")
-            self.refresh_decks()
+    
+    def open_study_center(self):
+        """Open the Study Center."""
+        self.study_gui.on_close = self.show_deck_selection  # Set return callback
+        self.study_gui.show_study_center()
 
 def main():
     root = tk.Tk()

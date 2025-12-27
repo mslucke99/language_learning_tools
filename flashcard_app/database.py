@@ -38,6 +38,68 @@ class FlashcardDatabase:
                 FOREIGN KEY (deck_id) REFERENCES decks (id) ON DELETE CASCADE
             )
         """)
+        # Create imported_content table for browser extension imports
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS imported_content (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content_type TEXT NOT NULL,  -- 'word', 'sentence', 'phrase'
+                content TEXT NOT NULL,
+                context TEXT,  -- surrounding text or sentence
+                title TEXT,    -- page title if available
+                url TEXT NOT NULL,
+                language TEXT, -- target language
+                created_at TEXT NOT NULL,
+                processed INTEGER DEFAULT 0,  -- 0=not processed, 1=processed into flashcards
+                tags TEXT     -- comma-separated tags
+            )
+        """)
+        
+        # Create word_definitions table for storing user-entered or AI-generated definitions
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS word_definitions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                imported_content_id INTEGER NOT NULL,
+                word TEXT NOT NULL,
+                definition TEXT NOT NULL,
+                definition_language TEXT,  -- 'native' or language code
+                source TEXT DEFAULT 'user',  -- 'user' or 'ollama'
+                created_at TEXT NOT NULL,
+                last_updated TEXT NOT NULL,
+                examples TEXT,  -- JSON list of example sentences
+                notes TEXT,  -- user notes
+                difficulty_level INTEGER DEFAULT 0,  -- 0-5 difficulty scale
+                FOREIGN KEY (imported_content_id) REFERENCES imported_content (id) ON DELETE CASCADE,
+                UNIQUE(imported_content_id, definition_language)
+            )
+        """)
+        
+        # Create sentence_explanations table for AI-generated or user-entered explanations
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sentence_explanations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                imported_content_id INTEGER NOT NULL,
+                sentence TEXT NOT NULL,
+                explanation TEXT NOT NULL,
+                explanation_language TEXT,  -- 'native' or language code
+                source TEXT DEFAULT 'user',  -- 'user' or 'ollama'
+                focus_area TEXT,  -- 'grammar', 'vocabulary', 'context', 'all'
+                created_at TEXT NOT NULL,
+                last_updated TEXT NOT NULL,
+                grammar_notes TEXT,  -- Specific grammar explanations
+                user_notes TEXT,  -- User's own notes
+                FOREIGN KEY (imported_content_id) REFERENCES imported_content (id) ON DELETE CASCADE
+            )
+        """)
+        
+        # Create study_settings table for user preferences
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS study_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                setting_key TEXT NOT NULL UNIQUE,
+                setting_value TEXT NOT NULL
+            )
+        """)
+        
         self.conn.commit()
 
     def create_deck(self, name: str, description: str = "") -> int:
@@ -162,14 +224,11 @@ class FlashcardDatabase:
             flashcards.append(flashcard)
         return flashcards
 
-    def update_flashcard(self, flashcard: Flashcard) -> bool:
-        """Update a flashcard's stats."""
+    def update_flashcard(self, flashcard):
+        # Update a flashcard's stats
         cursor = self.conn.cursor()
         cursor.execute(
-            """UPDATE flashcards 
-               SET last_reviewed = ?, easiness = ?, interval = ?, repetitions = ?, 
-                   total_reviews = ?, correct_reviews = ?
-               WHERE id = ?""",
+            "UPDATE flashcards SET last_reviewed = ?, easiness = ?, interval = ?, repetitions = ?, total_reviews = ?, correct_reviews = ? WHERE id = ?",
             (
                 flashcard.last_reviewed.isoformat() if flashcard.last_reviewed else None,
                 flashcard.easiness,
@@ -213,6 +272,123 @@ class FlashcardDatabase:
             "total_reviews": total_reviews,
             "correct_reviews": correct,
             "overall_accuracy": (correct / total_reviews * 100) if total_reviews > 0 else 0.0
+        }
+
+    # ===== IMPORTED CONTENT METHODS =====
+
+    def add_imported_content(self, content_type: str, content: str, url: str, 
+                           title: str = "", context: str = "", language: str = "", 
+                           tags: str = "") -> int:
+        """Add imported content from browser extension."""
+        print(f'\n[DB] add_imported_content called: type={content_type}, content={content[:50]}...', flush=True)
+        cursor = self.conn.cursor()
+        try:
+            print(f'[DB] Executing INSERT...', flush=True)
+            cursor.execute("""
+                INSERT INTO imported_content 
+                (content_type, content, context, title, url, language, created_at, tags)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (content_type, content, context, title, url, language, 
+                  datetime.now().isoformat(), tags))
+            print(f'[DB] INSERT executed', flush=True)
+            self.conn.commit()
+            print(f'[DB] COMMIT successful', flush=True)
+            row_id = cursor.lastrowid
+            print(f'[DB] Returned row ID: {row_id}', flush=True)
+            return row_id
+        except Exception as e:
+            print(f'[DB] ERROR in add_imported_content: {str(e)}', flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
+
+    def get_imported_content(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        """Get imported content for review."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, content_type, content, context, title, url, language, created_at, processed, tags
+            FROM imported_content 
+            ORDER BY created_at DESC 
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                "id": row[0],
+                "content_type": row[1],
+                "content": row[2],
+                "context": row[3],
+                "title": row[4],
+                "url": row[5],
+                "language": row[6],
+                "created_at": row[7],
+                "processed": bool(row[8]),
+                "tags": row[9] or ""
+            })
+        return results
+
+    def get_imported_content_by_type(self, content_type: str) -> list[dict]:
+        """Get imported content by type (word, sentence, phrase)."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, content_type, content, context, title, url, language, created_at, processed, tags
+            FROM imported_content 
+            WHERE content_type = ?
+            ORDER BY created_at DESC
+        """, (content_type,))
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                "id": row[0],
+                "content_type": row[1],
+                "content": row[2],
+                "context": row[3],
+                "title": row[4],
+                "url": row[5],
+                "language": row[6],
+                "created_at": row[7],
+                "processed": bool(row[8]),
+                "tags": row[9] or ""
+            })
+        return results
+
+    def mark_content_processed(self, content_id: int) -> bool:
+        """Mark imported content as processed (converted to flashcards)."""
+        cursor = self.conn.cursor()
+        cursor.execute("UPDATE imported_content SET processed = 1 WHERE id = ?", (content_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_imported_content(self, content_id: int) -> bool:
+        """Delete imported content."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM imported_content WHERE id = ?", (content_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def get_imported_content_stats(self) -> dict:
+        """Get statistics about imported content."""
+        cursor = self.conn.cursor()
+        
+        # Total imported items
+        cursor.execute("SELECT COUNT(*) FROM imported_content")
+        total = cursor.fetchone()[0]
+        
+        # By type
+        cursor.execute("SELECT content_type, COUNT(*) FROM imported_content GROUP BY content_type")
+        type_counts = {row[0]: row[1] for row in cursor.fetchall()}
+        
+        # Processed vs unprocessed
+        cursor.execute("SELECT processed, COUNT(*) FROM imported_content GROUP BY processed")
+        processed_counts = {bool(row[0]): row[1] for row in cursor.fetchall()}
+        
+        return {
+            "total_imported": total,
+            "by_type": type_counts,
+            "processed": processed_counts.get(True, 0),
+            "unprocessed": processed_counts.get(False, 0)
         }
 
     def close(self):

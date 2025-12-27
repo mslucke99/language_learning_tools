@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Language Learning Importer</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body {
+            width: 350px;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .header {
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 20px;
+            color: #333;
+        }
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #f5f5f5;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .status-indicator.online {
+            background: #34C759;
+        }
+        .status-indicator.offline {
+            background: #FF3B30;
+        }
+        .info-section {
+            background: #f9f9f9;
+            border-left: 3px solid #007AFF;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .info-section p {
+            margin: 0;
+        }
+        button {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .primary-btn {
+            background: #007AFF;
+            color: white;
+            width: 100%;
+        }
+        .primary-btn:hover {
+            background: #0056CC;
+        }
+        .error-box {
+            background: #FFE5E5;
+            border: 1px solid #FF9999;
+            color: #C00;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: none;
+        }
+        .error-box.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>📥 Language Importer</h1>
+        </div>
+
+        <!-- Status -->
+        <div class="status-bar">
+            <span class="status-indicator offline" id="api-status"></span>
+            <span id="api-status-text">Checking...</span>
+        </div>
+
+        <!-- Error Box -->
+        <div class="error-box" id="error-box"></div>
+
+        <!-- Instructions -->
+        <div class="info-section">
+            <p><strong>How to use:</strong></p>
+            <p>1. Select a word or sentence on any webpage</p>
+            <p>2. Choose "Add as Word" or "Add as Sentence" from the popup or right-click menu</p>
+            <p>3. Content is saved to the app for study</p>
+        </div>
+
+        <!-- Status Message -->
+        <div id="status-message" style="font-size: 13px; text-align: center; display: none;">
+            <span id="status-text"></span>
+        </div>
+
+                <div class="info-box">
+                    <strong>How to use:</strong><br>
+                    1. Highlight unknown words<br>
+                    2. Click "Mark for Study"<br>
+                    3. Flashcard created instantly!
+                </div>
+
+                <button class="secondary" id="help-btn">? Get Help</button>
+            </div>
+
+            <!-- Grammar Tab -->
+            <div id="grammar-tab" class="tab-content">
+                <label for="sentence-input">Paste a sentence to analyze:</label>
+                <textarea id="sentence-input" placeholder="Paste a sentence from your reading..."></textarea>
+                
+                <button id="analyze-btn">
+                    <span id="analyze-spinner" style="display: none;" class="spinner"></span>
+                    <span id="analyze-text">📝 Analyze Sentence</span>
+                </button>
+
+                <div id="grammar-results"></div>
+
+                <div class="divider"></div>
+
+                <label for="grammar-topic">Ask about grammar:</label>
+                <input id="grammar-topic" type="text" placeholder="e.g., 'preterite tense', 'subjunctive mood'">
+                
+                <button id="explain-btn">
+                    <span id="grammar-spinner" style="display: none;" class="spinner"></span>
+                    <span id="grammar-text">🎓 Get Explanation</span>
+                </button>
+
+                <div id="grammar-explanation"></div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div id="settings-tab" class="tab-content">
+                <div class="info-box">
+                    <strong>AI Settings:</strong><br>
+                    These settings affect grammar explanations and word definitions.
+                </div>
+
+                <label>
+                    <input type="checkbox" id="auto-definitions" checked> 
+                    Auto-fetch definitions for marked words
+                </label>
+
+                <label>
+                    <input type="checkbox" id="detailed-grammar" checked>
+                    Detailed grammar breakdowns
+                </label>
+
+                <label>
+                    <input type="checkbox" id="include-examples" checked>
+                    Include example sentences
+                </label>
+
+                <button class="secondary" id="reset-btn">Reset Settings</button>
+                <button class="secondary" id="export-btn">📥 Export Data</button>
+            </div>
+        </div>
+
+        <!-- Help Section (initially hidden) -->
+        <div id="help-section" style="display: none;">
+            <div class="divider"></div>
+            <div class="info-box">
+                <strong>Tips:</strong>
+                <ul style="margin: 8px 0 0 0; padding-left: 16px;">
+                    <li>Use your native language for better comprehension when starting</li>
+                    <li>Switch to target language explanations once you're intermediate</li>
+                    <li>Grammar breakdowns help understand sentence structure</li>
+                    <li>All your data stays local on your computer</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
