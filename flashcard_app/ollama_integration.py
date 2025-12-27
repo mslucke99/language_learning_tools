@@ -203,6 +203,20 @@ Provide:
             print(f"Error translating: {e}")
             return None
     
+    def generate_response(self, prompt: str, timeout: int = 60) -> str:
+        """
+        Generate a response from the Ollama model given a prompt.
+        Public method for querying the model.
+        
+        Args:
+            prompt: The prompt to send to the model
+            timeout: Request timeout in seconds (default 60 for slow hardware)
+        
+        Returns:
+            Model response string or None if unavailable
+        """
+        return self._query_model(prompt, timeout)
+    
     def _query_model(self, prompt: str, timeout: int = 60) -> str:
         """
         Query the Ollama model with a prompt.

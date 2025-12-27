@@ -7,6 +7,7 @@ Features:
 - Generate and store sentence explanations
 - Integration with Ollama for AI-powered learning
 - Language preferences for definitions and explanations
+- Custom prompt support for advanced users
 """
 
 import json
@@ -14,6 +15,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 from database import FlashcardDatabase
 from ollama_integration import OllamaClient, OllamaThreadedQuery
+from prompts import WORD_PROMPTS, SENTENCE_PROMPTS
 
 
 class StudyManager:
@@ -35,6 +37,8 @@ class StudyManager:
         self.study_language = self._get_setting('study_language', 'Spanish')
         self.prefer_native_definitions = self._get_setting('prefer_native_definitions', 'true') == 'true'
         self.prefer_native_explanations = self._get_setting('prefer_native_explanations', 'false') == 'true'
+        self.request_timeout = int(self._get_setting('request_timeout', '120'))
+        self.ollama_model = self._get_setting('ollama_model', '')
     
     # ========== SETTINGS MANAGEMENT ==========
     
@@ -73,6 +77,110 @@ class StudyManager:
         """Set whether to prefer native language for explanations."""
         self._set_setting('prefer_native_explanations', 'true' if prefer_native else 'false')
         self.prefer_native_explanations = prefer_native
+    
+    def set_request_timeout(self, timeout: int):
+        """Set the request timeout in seconds."""
+        self._set_setting('request_timeout', str(timeout))
+        self.request_timeout = timeout
+    
+    def get_request_timeout(self) -> int:
+        """Get the current request timeout in seconds."""
+        return self.request_timeout
+    
+    def set_ollama_model(self, model: str):
+        """Set the Ollama model to use."""
+        self._set_setting('ollama_model', model)
+        self.ollama_model = model
+        # Also update the client if available
+        if self.ollama_client:
+            self.ollama_client.set_model(model)
+    
+    def get_ollama_model(self) -> str:
+        """Get the currently configured Ollama model."""
+        return self.ollama_model
+    
+    def get_available_ollama_models(self) -> List[str]:
+        """Get list of available Ollama models."""
+        if self.ollama_client:
+            return self.ollama_client.get_available_models()
+        return []
+    
+    # ========== PROMPT MANAGEMENT ==========
+    
+    def get_word_prompt(self, prompt_type: str, language: str = 'native') -> str:
+        """
+        Get word generation prompt (custom or default).
+        
+        Args:
+            prompt_type: 'definition', 'explanation', or 'examples'
+            language: 'native' or 'study'
+            
+        Returns:
+            The prompt template
+        """
+        # Check for custom prompt
+        custom_key = f'word_prompt_{prompt_type}_{language}'
+        custom = self._get_setting(custom_key, '')
+        
+        if custom:
+            return custom
+        
+        # Use default
+        if prompt_type in WORD_PROMPTS:
+            if language == 'native':
+                return WORD_PROMPTS[prompt_type]['native_template']
+            else:
+                return WORD_PROMPTS[prompt_type]['study_template']
+        
+        return f"Generate a {prompt_type} for the word: {{word}}"
+    
+    def set_word_prompt(self, prompt_type: str, language: str, prompt: str):
+        """Set custom word generation prompt."""
+        key = f'word_prompt_{prompt_type}_{language}'
+        self._set_setting(key, prompt)
+    
+    def get_sentence_prompt(self, focus_area: str) -> str:
+        """
+        Get sentence explanation prompt (custom or default).
+        
+        Args:
+            focus_area: 'grammar', 'vocabulary', 'context', 'pronunciation', or 'all'
+            
+        Returns:
+            The prompt template
+        """
+        # Check for custom prompt
+        custom_key = f'sentence_prompt_{focus_area}'
+        custom = self._get_setting(custom_key, '')
+        
+        if custom:
+            return custom
+        
+        # Use default
+        if focus_area in SENTENCE_PROMPTS:
+            return SENTENCE_PROMPTS[focus_area]['template']
+        
+        return f"Explain this sentence focusing on {focus_area}: {{sentence}}"
+    
+    def set_sentence_prompt(self, focus_area: str, prompt: str):
+        """Set custom sentence explanation prompt."""
+        key = f'sentence_prompt_{focus_area}'
+        self._set_setting(key, prompt)
+    
+    def get_default_word_prompt(self, prompt_type: str, language: str) -> str:
+        """Get the default prompt for a word type (for display in UI)."""
+        if prompt_type in WORD_PROMPTS:
+            if language == 'native':
+                return WORD_PROMPTS[prompt_type]['native_template']
+            else:
+                return WORD_PROMPTS[prompt_type]['study_template']
+        return ""
+    
+    def get_default_sentence_prompt(self, focus_area: str) -> str:
+        """Get the default prompt for a sentence focus area (for display in UI)."""
+        if focus_area in SENTENCE_PROMPTS:
+            return SENTENCE_PROMPTS[focus_area]['template']
+        return ""
     
     # ========== IMPORTED CONTENT RETRIEVAL ==========
     
@@ -255,19 +363,19 @@ class StudyManager:
             })
         return definitions
     
-    def generate_word_definition(self, imported_content_id: int, 
-                                language: str = 'native',
-                                use_simplified: bool = True) -> Tuple[bool, str]:
+    def generate_word_content(self, imported_content_id: int, 
+                             content_type: str = 'definition',
+                             language: str = 'native') -> Tuple[bool, str]:
         """
-        Generate a word definition using Ollama.
+        Generate word content (definition, explanation, or examples) using Ollama.
         
         Args:
             imported_content_id: ID of the imported word
-            language: 'native' or language code
-            use_simplified: Use simplified phrases for study language
+            content_type: 'definition', 'explanation', or 'examples'
+            language: 'native' or 'study'
             
         Returns:
-            Tuple of (success: bool, definition: str)
+            Tuple of (success: bool, content: str)
         """
         if not self.ollama_client or not self.ollama_client.is_available():
             return False, "Ollama is not available"
@@ -280,35 +388,44 @@ class StudyManager:
         
         word = result[0]
         
-        # Build prompt
-        if language == 'native':
-            target_lang = self.native_language
-            prompt = f"""Provide a clear, concise definition of the word "{word}" in {self.native_language}.
-Keep it to 1-2 sentences. Include context about common usage."""
-        else:
-            target_lang = language or self.study_language
-            if use_simplified:
-                prompt = f"""Explain the word "{word}" in {self.study_language} using simple, common words that a beginner would understand.
-Use present tense and active voice. Keep it to 1-2 sentences."""
-            else:
-                prompt = f"""Provide a definition of the word "{word}" in {self.study_language}."""
+        # Get the appropriate prompt
+        target_lang = self.native_language if language == 'native' else self.study_language
+        prompt_template = self.get_word_prompt(content_type, language)
+        prompt = prompt_template.format(word=word, native_language=self.native_language, study_language=self.study_language)
         
         # Generate using Ollama
         try:
-            definition = self.ollama_client.generate_response(prompt)
-            if definition:
+            content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            if content:
                 # Store the generated definition
                 self.add_word_definition(
                     imported_content_id,
-                    definition,
+                    content,
                     language,
-                    notes=f"Generated by {self.ollama_client.model}"
+                    notes=f"Generated {content_type} by {self.ollama_client.model}"
                 )
-                return True, definition
+                return True, content
             else:
-                return False, "Failed to generate definition"
+                return False, f"Failed to generate {content_type}"
         except Exception as e:
             return False, f"Error: {str(e)}"
+    
+    # Keep the old method for backwards compatibility
+    def generate_word_definition(self, imported_content_id: int, 
+                                language: str = 'native',
+                                use_simplified: bool = True) -> Tuple[bool, str]:
+        """
+        Generate a word definition using Ollama (deprecated - use generate_word_content instead).
+        
+        Args:
+            imported_content_id: ID of the imported word
+            language: 'native' or language code
+            use_simplified: Use simplified phrases for study language
+            
+        Returns:
+            Tuple of (success: bool, definition: str)
+        """
+        return self.generate_word_content(imported_content_id, 'definition', language)
     
     def set_word_difficulty(self, word_definition_id: int, difficulty: int):
         """Set difficulty level (0-5) for a word definition."""
@@ -451,20 +568,23 @@ Use present tense and active voice. Keep it to 1-2 sentences."""
     
     def generate_sentence_explanation(self, imported_content_id: int,
                                      language: str = 'native',
-                                     focus_area: str = 'all') -> Tuple[bool, str]:
+                                     focus_areas: List[str] = None) -> Tuple[bool, str]:
         """
-        Generate a sentence explanation using Ollama.
+        Generate a sentence explanation using Ollama for multiple focus areas.
         
         Args:
             imported_content_id: ID of the imported sentence
             language: 'native' or language code
-            focus_area: 'grammar', 'vocabulary', 'context', or 'all'
+            focus_areas: List of focus areas ('grammar', 'vocabulary', 'context', 'pronunciation', 'all')
             
         Returns:
-            Tuple of (success: bool, explanation: str)
+            Tuple of (success: bool, explanation: str with all focus areas)
         """
         if not self.ollama_client or not self.ollama_client.is_available():
             return False, "Ollama is not available"
+        
+        if focus_areas is None or len(focus_areas) == 0:
+            focus_areas = ['all']
         
         cursor = self.db.conn.cursor()
         cursor.execute("SELECT content FROM imported_content WHERE id = ?", (imported_content_id,))
@@ -473,43 +593,47 @@ Use present tense and active voice. Keep it to 1-2 sentences."""
             return False, "Sentence not found"
         
         sentence = result[0]
+        target_lang = self.native_language if language == 'native' else self.study_language
         
-        # Build focus-specific prompt
-        focus_prompts = {
-            'grammar': f"""Explain the grammar structures in this sentence in {self.native_language if language == 'native' else self.study_language}:
-"{sentence}"
-Focus on tense, verb forms, and sentence structure.""",
-            
-            'vocabulary': f"""Explain the key vocabulary words in this sentence in {self.native_language if language == 'native' else self.study_language}:
-"{sentence}"
-Focus on word meanings and usage.""",
-            
-            'context': f"""Explain the context and meaning of this sentence in {self.native_language if language == 'native' else self.study_language}:
-"{sentence}"
-Focus on what the sentence means and when it would be used.""",
-            
-            'all': f"""Provide a comprehensive explanation of this sentence in {self.native_language if language == 'native' else self.study_language}:
-"{sentence}"
-Include grammar, vocabulary, and context. Keep it concise (3-4 sentences)."""
-        }
+        # Collect all explanations
+        all_explanations = []
+        primary_focus = None
         
-        prompt = focus_prompts.get(focus_area, focus_prompts['all'])
-        
-        # Generate using Ollama
         try:
-            explanation = self.ollama_client.generate_response(prompt)
-            if explanation:
-                # Store the generated explanation
+            for focus_area in focus_areas:
+                # Get the prompt for this focus area
+                prompt_template = self.get_sentence_prompt(focus_area)
+                prompt = prompt_template.format(sentence=sentence, language=target_lang, study_language=self.study_language)
+                
+                # Generate
+                explanation = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+                if explanation:
+                    if focus_area == 'all':
+                        focus_name = 'Comprehensive'
+                    else:
+                        focus_name = SENTENCE_PROMPTS.get(focus_area, {}).get('name', focus_area.title())
+                    
+                    all_explanations.append(f"**{focus_name}:**\n{explanation}")
+                    
+                    if primary_focus is None:
+                        primary_focus = focus_area
+            
+            if all_explanations:
+                combined_explanation = "\n\n".join(all_explanations)
+                
+                # Store the generated explanation (using first focus as primary)
                 self.add_sentence_explanation(
                     imported_content_id,
-                    explanation,
+                    combined_explanation,
                     language,
-                    focus_area,
-                    user_notes=f"Generated by {self.ollama_client.model}"
+                    primary_focus,
+                    user_notes=f"Generated by {self.ollama_client.model} (focus: {', '.join(focus_areas)})"
                 )
-                return True, explanation
+                return True, combined_explanation
             else:
-                return False, "Failed to generate explanation"
+                return False, "Failed to generate explanations"
+        except Exception as e:
+            return False, f"Error: {str(e)}"
         except Exception as e:
             return False, f"Error: {str(e)}"
     
