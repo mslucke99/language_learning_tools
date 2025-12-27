@@ -1,0 +1,14 @@
+This is a list of the features that I plan on adding to this app. 
+1. I plan on allowing word definitions to be exported to flashcard decks
+2. I plan on allowing promtps, models, and timeouts to be configurable
+3. Adding follow ups to the grammar explanations to allow the user to explore specific points
+4. A grammar book that will allow the user to add specific explanations of the grammar to a spot where they can be saved
+5. Batch processing for word explanations
+6. Sort and filter options for words and phrases
+7. I might look into tool use to allow agents to export words in the sentences directly to flash cards
+7a. I might need some universal vocabulary tracker for that to work well.
+7b. If I do that, it might also be a good idea to make sure the model doesn't add a bunch of excessively easy words
+8. I might try to add quiz features
+9. example sentence generation based on grammar patterns (after grammar book is added)
+10. Perhaps I can even give the LLMs tool use and allow them to look up what one should know for specific exams for various languages could be
+
