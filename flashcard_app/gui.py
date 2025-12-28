@@ -73,6 +73,10 @@ class FlashcardApp:
         study_btn = ttk.Button(frame, text="🎓 Study Center", command=self.open_study_center, style="Large.TButton")
         study_btn.pack(pady=15, fill="x", ipady=10)
         
+        # Settings button
+        settings_btn = ttk.Button(frame, text="⚙️ Settings", command=self.show_settings, style="Large.TButton")
+        settings_btn.pack(pady=15, fill="x", ipady=10)
+        
         # Deck list
         list_label = ttk.Label(frame, text="Your Decks:", font=("Arial", 13, "bold"))
         list_label.pack(pady=15)
@@ -604,10 +608,240 @@ Average Interval: {avg_interval:.1f} days
             self.db.delete_deck(deck_id)
             messagebox.showinfo("Success", "Deck deleted!")
     
+    
     def open_study_center(self):
         """Open the Study Center."""
         self.study_gui.on_close = self.show_deck_selection  # Set return callback
         self.study_gui.show_study_center()
+    
+    def show_settings(self):
+        """Show the settings dialog."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Settings")
+        dialog.geometry("600x500")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Create notebook for tabs
+        notebook = ttk.Notebook(dialog)
+        notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # ===== OLLAMA SETTINGS TAB =====
+        ollama_frame = ttk.Frame(notebook, padding="20")
+        notebook.add(ollama_frame, text="Ollama Settings")
+        
+        # Model selection
+        ttk.Label(ollama_frame, text="Ollama Model:", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 5))
+        
+        model_frame = ttk.Frame(ollama_frame)
+        model_frame.pack(fill="x", pady=(0, 15))
+        
+        current_model = self.study_manager.get_ollama_model()
+        available_models = self.study_manager.get_available_ollama_models()
+        
+        if not available_models:
+            ttk.Label(model_frame, text="No models available. Is Ollama running?", foreground="red").pack(anchor="w")
+            model_var = tk.StringVar(value="")
+        else:
+            model_var = tk.StringVar(value=current_model if current_model else available_models[0])
+            model_dropdown = ttk.Combobox(model_frame, textvariable=model_var, values=available_models, state="readonly", width=40)
+            model_dropdown.pack(anchor="w")
+        
+        # Timeout setting
+        ttk.Label(ollama_frame, text="Request Timeout (seconds):", font=("Arial", 11, "bold")).pack(anchor="w", pady=(15, 5))
+        
+        timeout_frame = ttk.Frame(ollama_frame)
+        timeout_frame.pack(fill="x", pady=(0, 15))
+        
+        current_timeout = self.study_manager.get_request_timeout()
+        timeout_var = tk.IntVar(value=current_timeout)
+        timeout_spinbox = ttk.Spinbox(timeout_frame, from_=30, to=600, textvariable=timeout_var, width=10)
+        timeout_spinbox.pack(side="left")
+        ttk.Label(timeout_frame, text="  (30-600 seconds, higher for slower hardware)", font=("Arial", 9)).pack(side="left")
+        
+        # Info label
+        info_text = """
+Ollama Settings:
+• Model: Choose which Ollama model to use for AI features
+• Timeout: How long to wait for AI responses (increase for slower systems)
+
+Note: Changes take effect immediately after clicking Save.
+        """
+        info_label = ttk.Label(ollama_frame, text=info_text, font=("Arial", 9), foreground="gray", justify="left")
+        info_label.pack(anchor="w", pady=(20, 0))
+        
+        # ===== LANGUAGE SETTINGS TAB =====
+        lang_frame = ttk.Frame(notebook, padding="20")
+        notebook.add(lang_frame, text="Language Preferences")
+        
+        # Native language
+        ttk.Label(lang_frame, text="Native Language:", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 5))
+        native_var = tk.StringVar(value=self.study_manager.native_language)
+        native_entry = ttk.Entry(lang_frame, textvariable=native_var, width=30)
+        native_entry.pack(anchor="w", pady=(0, 15))
+        
+        # Study language
+        ttk.Label(lang_frame, text="Study Language:", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 5))
+        study_var = tk.StringVar(value=self.study_manager.study_language)
+        study_entry = ttk.Entry(lang_frame, textvariable=study_var, width=30)
+        study_entry.pack(anchor="w", pady=(0, 15))
+        
+        # Definition language preference
+        ttk.Label(lang_frame, text="Definition Language Preference:", font=("Arial", 11, "bold")).pack(anchor="w", pady=(15, 5))
+        def_pref_var = tk.BooleanVar(value=self.study_manager.prefer_native_definitions)
+        ttk.Radiobutton(lang_frame, text="Native language (easier to understand)", variable=def_pref_var, value=True).pack(anchor="w")
+        ttk.Radiobutton(lang_frame, text="Study language (immersive learning)", variable=def_pref_var, value=False).pack(anchor="w")
+        
+        # Explanation language preference
+        ttk.Label(lang_frame, text="Explanation Language Preference:", font=("Arial", 11, "bold")).pack(anchor="w", pady=(15, 5))
+        exp_pref_var = tk.BooleanVar(value=self.study_manager.prefer_native_explanations)
+        ttk.Radiobutton(lang_frame, text="Native language", variable=exp_pref_var, value=True).pack(anchor="w")
+        ttk.Radiobutton(lang_frame, text="Study language", variable=exp_pref_var, value=False).pack(anchor="w")
+        
+        # ===== CUSTOM PROMPTS TAB =====
+        prompts_frame = ttk.Frame(notebook, padding="20")
+        notebook.add(prompts_frame, text="Custom Prompts (Advanced)")
+        
+        # Info label
+        info_label = ttk.Label(
+            prompts_frame,
+            text="Customize AI prompts for advanced control. Leave blank to use defaults.\nUse {word}, {sentence}, {native_language}, {study_language} as placeholders.",
+            font=("Arial", 9),
+            foreground="gray",
+            justify="left"
+        )
+        info_label.pack(anchor="w", pady=(0, 10))
+        
+        # Create scrollable frame for prompts
+        canvas = tk.Canvas(prompts_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(prompts_frame, orient="vertical", command=canvas.yview)
+        scrollable_prompts = ttk.Frame(canvas)
+        
+        scrollable_prompts.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_prompts, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Word prompts
+        word_prompts_frame = ttk.LabelFrame(scrollable_prompts, text="Word Prompts", padding="10")
+        word_prompts_frame.pack(fill="x", pady=5)
+        
+        prompt_vars = {}
+        
+        # Definition prompt (native)
+        ttk.Label(word_prompts_frame, text="Definition (Native Language):", font=("Arial", 9, "bold")).pack(anchor="w", pady=(5, 2))
+        current_def_native = self.study_manager.get_word_prompt('definition', 'native')
+        prompt_vars['word_definition_native'] = tk.StringVar(value=current_def_native)
+        def_native_entry = ttk.Entry(word_prompts_frame, textvariable=prompt_vars['word_definition_native'], width=70)
+        def_native_entry.pack(anchor="w", pady=(0, 5))
+        
+        # Definition prompt (study)
+        ttk.Label(word_prompts_frame, text="Definition (Study Language):", font=("Arial", 9, "bold")).pack(anchor="w", pady=(5, 2))
+        current_def_study = self.study_manager.get_word_prompt('definition', 'study')
+        prompt_vars['word_definition_study'] = tk.StringVar(value=current_def_study)
+        def_study_entry = ttk.Entry(word_prompts_frame, textvariable=prompt_vars['word_definition_study'], width=70)
+        def_study_entry.pack(anchor="w", pady=(0, 5))
+        
+        # Examples prompt (native)
+        ttk.Label(word_prompts_frame, text="Examples (Native Language):", font=("Arial", 9, "bold")).pack(anchor="w", pady=(5, 2))
+        current_ex_native = self.study_manager.get_word_prompt('examples', 'native')
+        prompt_vars['word_examples_native'] = tk.StringVar(value=current_ex_native)
+        ex_native_entry = ttk.Entry(word_prompts_frame, textvariable=prompt_vars['word_examples_native'], width=70)
+        ex_native_entry.pack(anchor="w", pady=(0, 5))
+        
+        # Sentence prompts
+        sentence_prompts_frame = ttk.LabelFrame(scrollable_prompts, text="Sentence Prompts", padding="10")
+        sentence_prompts_frame.pack(fill="x", pady=5)
+        
+        # Grammar prompt
+        ttk.Label(sentence_prompts_frame, text="Grammar Analysis:", font=("Arial", 9, "bold")).pack(anchor="w", pady=(5, 2))
+        current_grammar = self.study_manager.get_sentence_prompt('grammar')
+        prompt_vars['sentence_grammar'] = tk.StringVar(value=current_grammar)
+        grammar_entry = ttk.Entry(sentence_prompts_frame, textvariable=prompt_vars['sentence_grammar'], width=70)
+        grammar_entry.pack(anchor="w", pady=(0, 5))
+        
+        # Vocabulary prompt
+        ttk.Label(sentence_prompts_frame, text="Vocabulary Analysis:", font=("Arial", 9, "bold")).pack(anchor="w", pady=(5, 2))
+        current_vocab = self.study_manager.get_sentence_prompt('vocabulary')
+        prompt_vars['sentence_vocabulary'] = tk.StringVar(value=current_vocab)
+        vocab_entry = ttk.Entry(sentence_prompts_frame, textvariable=prompt_vars['sentence_vocabulary'], width=70)
+        vocab_entry.pack(anchor="w", pady=(0, 5))
+        
+        # Comprehensive prompt
+        ttk.Label(sentence_prompts_frame, text="Comprehensive Analysis:", font=("Arial", 9, "bold")).pack(anchor="w", pady=(5, 2))
+        current_all = self.study_manager.get_sentence_prompt('all')
+        prompt_vars['sentence_all'] = tk.StringVar(value=current_all)
+        all_entry = ttk.Entry(sentence_prompts_frame, textvariable=prompt_vars['sentence_all'], width=70)
+        all_entry.pack(anchor="w", pady=(0, 10))
+        
+        # Reset to defaults button
+        def reset_prompts():
+            if messagebox.askyesno("Reset Prompts", "Reset all prompts to defaults?"):
+                from prompts import WORD_PROMPTS, SENTENCE_PROMPTS
+                prompt_vars['word_definition_native'].set(WORD_PROMPTS['definition']['native_template'])
+                prompt_vars['word_definition_study'].set(WORD_PROMPTS['definition']['study_template'])
+                prompt_vars['word_examples_native'].set(WORD_PROMPTS['examples']['native_template'])
+                prompt_vars['sentence_grammar'].set(SENTENCE_PROMPTS['grammar']['template'])
+                prompt_vars['sentence_vocabulary'].set(SENTENCE_PROMPTS['vocabulary']['template'])
+                prompt_vars['sentence_all'].set(SENTENCE_PROMPTS['all']['template'])
+        
+        reset_btn = ttk.Button(scrollable_prompts, text="Reset to Defaults", command=reset_prompts)
+        reset_btn.pack(pady=10)
+        
+        # ===== SAVE/CANCEL BUTTONS =====
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(fill="x", padx=10, pady=10)
+        
+        def save_settings():
+            # Save Ollama settings
+            if available_models and model_var.get():
+                self.study_manager.set_ollama_model(model_var.get())
+            self.study_manager.set_request_timeout(timeout_var.get())
+            
+            # Save language settings
+            self.study_manager.set_native_language(native_var.get())
+            self.study_manager.set_study_language(study_var.get())
+            self.study_manager.set_definition_language_preference(def_pref_var.get())
+            self.study_manager.set_explanation_language_preference(exp_pref_var.get())
+            
+            # Save custom prompts (only if they differ from defaults)
+            from prompts import WORD_PROMPTS, SENTENCE_PROMPTS
+            
+            # Word prompts
+            if prompt_vars['word_definition_native'].get() != WORD_PROMPTS['definition']['native_template']:
+                self.study_manager.set_word_prompt('definition', 'native', prompt_vars['word_definition_native'].get())
+            if prompt_vars['word_definition_study'].get() != WORD_PROMPTS['definition']['study_template']:
+                self.study_manager.set_word_prompt('definition', 'study', prompt_vars['word_definition_study'].get())
+            if prompt_vars['word_examples_native'].get() != WORD_PROMPTS['examples']['native_template']:
+                self.study_manager.set_word_prompt('examples', 'native', prompt_vars['word_examples_native'].get())
+            
+            # Sentence prompts
+            if prompt_vars['sentence_grammar'].get() != SENTENCE_PROMPTS['grammar']['template']:
+                self.study_manager.set_sentence_prompt('grammar', prompt_vars['sentence_grammar'].get())
+            if prompt_vars['sentence_vocabulary'].get() != SENTENCE_PROMPTS['vocabulary']['template']:
+                self.study_manager.set_sentence_prompt('vocabulary', prompt_vars['sentence_vocabulary'].get())
+            if prompt_vars['sentence_all'].get() != SENTENCE_PROMPTS['all']['template']:
+                self.study_manager.set_sentence_prompt('all', prompt_vars['sentence_all'].get())
+            
+            messagebox.showinfo("Success", "Settings saved successfully!")
+            dialog.destroy()
+            
+            # Refresh the main screen to update Ollama status
+            self.show_deck_selection()
+
+        
+        save_btn = ttk.Button(button_frame, text="Save", command=save_settings, style="Large.TButton")
+        save_btn.pack(side="left", padx=5, fill="both", expand=True)
+        
+        cancel_btn = ttk.Button(button_frame, text="Cancel", command=dialog.destroy, style="Large.TButton")
+        cancel_btn.pack(side="left", padx=5, fill="both", expand=True)
+
 
 def main():
     root = tk.Tk()

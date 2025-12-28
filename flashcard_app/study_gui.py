@@ -84,18 +84,10 @@ Study Languages:
         )
         sentences_btn.pack(side="left", padx=10, fill="both", expand=True)
         
-        # Settings button
-        settings_btn = ttk.Button(
-            btn_frame,
-            text="⚙️ Settings",
-            command=self.show_settings,
-            style="Large.TButton"
-        )
-        settings_btn.pack(side="left", padx=10, fill="both", expand=True)
-        
         # Back button
         back_btn = ttk.Button(frame, text="← Back to Main Menu", command=self.on_close)
         back_btn.pack(pady=10)
+
     
     # ========== WORDS VIEW ==========
     
@@ -602,131 +594,9 @@ Study Languages:
             self.sentence_explanation_text.insert(tk.END, original_text)
             messagebox.showerror("Error", result)
     
-    # ========== SETTINGS ==========
-    
-    def show_settings(self):
-        """Show settings screen."""
-        self.clear_window()
-        
-        frame = ttk.Frame(self.root, padding="20")
-        frame.pack(fill="both", expand=True)
-        
-        # Add scrollbar for overflow
-        canvas = tk.Canvas(frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.scroll)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        # Title
-        title = ttk.Label(scrollable_frame, text="Study Settings", style="Title.TLabel")
-        title.pack(pady=20)
-        
-        # Language Settings
-        settings_frame = ttk.LabelFrame(scrollable_frame, text="Language Preferences", padding="15")
-        settings_frame.pack(fill="x", pady=10, padx=5)
-        
-        # Native language
-        ttk.Label(settings_frame, text="Your Native Language:", font=("Arial", 10)).pack(anchor="w", pady=5)
-        native_lang_var = tk.StringVar(value=self.study_manager.native_language)
-        native_entry = ttk.Entry(settings_frame, textvariable=native_lang_var, width=30)
-        native_entry.pack(anchor="w", pady=5)
-        
-        # Study language
-        ttk.Label(settings_frame, text="Language You're Studying:", font=("Arial", 10)).pack(anchor="w", pady=5)
-        study_lang_var = tk.StringVar(value=self.study_manager.study_language)
-        study_entry = ttk.Entry(settings_frame, textvariable=study_lang_var, width=30)
-        study_entry.pack(anchor="w", pady=5)
-        
-        # Output Language Preferences
-        pref_frame = ttk.LabelFrame(scrollable_frame, text="Output Language Preferences", padding="15")
-        pref_frame.pack(fill="x", pady=10, padx=5)
-        
-        def_native_var = tk.BooleanVar(value=self.study_manager.prefer_native_definitions)
-        ttk.Checkbutton(
-            pref_frame,
-            text="Prefer native language for word definitions",
-            variable=def_native_var
-        ).pack(anchor="w", pady=5)
-        
-        exp_native_var = tk.BooleanVar(value=self.study_manager.prefer_native_explanations)
-        ttk.Checkbutton(
-            pref_frame,
-            text="Prefer native language for sentence explanations",
-            variable=exp_native_var
-        ).pack(anchor="w", pady=5)
-        
-        # Ollama Settings
-        ollama_frame = ttk.LabelFrame(scrollable_frame, text="AI Generation Settings", padding="15")
-        ollama_frame.pack(fill="x", pady=10, padx=5)
-        
-        # Model selection
-        ttk.Label(ollama_frame, text="Ollama Model:", font=("Arial", 10)).pack(anchor="w", pady=5)
-        available_models = self.study_manager.get_available_ollama_models()
-        current_model = self.study_manager.get_ollama_model() or (available_models[0] if available_models else "")
-        
-        model_var = tk.StringVar(value=current_model)
-        if available_models:
-            model_combo = ttk.Combobox(ollama_frame, textvariable=model_var, values=available_models, width=40, state="readonly")
-            model_combo.pack(anchor="w", pady=5)
-        else:
-            ttk.Label(ollama_frame, text="No Ollama models available. Ensure Ollama is running.", foreground="red").pack(anchor="w", pady=5)
-        
-        # Request timeout
-        ttk.Label(ollama_frame, text="Request Timeout (seconds):", font=("Arial", 10)).pack(anchor="w", pady=5)
-        timeout_var = tk.StringVar(value=str(self.study_manager.get_request_timeout()))
-        timeout_spinbox = ttk.Spinbox(
-            ollama_frame,
-            from_=10,
-            to=300,
-            textvariable=timeout_var,
-            width=15
-        )
-        timeout_spinbox.pack(anchor="w", pady=5)
-        
-        ttk.Label(ollama_frame, text="Higher values allow slower models more time to respond", font=("Arial", 8), foreground="gray").pack(anchor="w", pady=2)
-        
-        # Canvas and scrollbar packing
-        canvas.pack(side="left", fill="both", expand=True, pady=10, padx=5)
-        scrollbar.pack(side="right", fill="y", pady=10, padx=(0, 5))
-        
-        # Save button
-        def save_settings():
-            self.study_manager.set_native_language(native_lang_var.get())
-            self.study_manager.set_study_language(study_lang_var.get())
-            self.study_manager.set_definition_language_preference(def_native_var.get())
-            self.study_manager.set_explanation_language_preference(exp_native_var.get())
-            
-            if model_var.get():
-                self.study_manager.set_ollama_model(model_var.get())
-            
-            try:
-                timeout = int(timeout_var.get())
-                if 10 <= timeout <= 300:
-                    self.study_manager.set_request_timeout(timeout)
-                else:
-                    messagebox.showerror("Invalid Timeout", "Timeout must be between 10 and 300 seconds")
-                    return
-            except ValueError:
-                messagebox.showerror("Invalid Timeout", "Please enter a valid number")
-                return
-            
-            messagebox.showinfo("Success", "Settings saved!")
-            self.show_study_center()
-        
-        button_frame = ttk.Frame(self.root)
-        button_frame.pack(fill="x", pady=10, padx=20)
-        
-        ttk.Button(button_frame, text="Save Settings", command=save_settings).pack(pady=20)
-        ttk.Button(button_frame, text="← Back", command=self.show_study_center).pack()
     
     # ========== UTILITY METHODS ==========
+
     
     def clear_window(self):
         """Clear all widgets from the window."""
