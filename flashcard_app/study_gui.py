@@ -32,6 +32,37 @@ class StudyGUI:
         self.current_word_id = None
         self.current_sentence_id = None
     
+    def _setup_standard_header(self, parent, title, back_cmd=None, action_text=None, action_cmd=None):
+        """Create a standard header with Back button, Title, and optional Action button."""
+        header_frame = ttk.Frame(parent)
+        header_frame.pack(fill="x", pady=(0, 10))
+        
+        # Left: Back Button
+        if back_cmd:
+            ttk.Button(header_frame, text="← Back", command=back_cmd).pack(side="left", padx=(0, 10))
+            
+        # Center: Title
+        ttk.Label(header_frame, text=title, style="Title.TLabel").pack(side="left", fill="x", expand=True)
+        
+        # Right: Action Button (e.g., "+ Add Item")
+        if action_text and action_cmd:
+            ttk.Button(header_frame, text=action_text, command=action_cmd).pack(side="right")
+            
+        return header_frame
+
+    def _bind_mousewheel(self, widget):
+        """Bind mousewheel events to a widget recursively."""
+        # Windows uses <MouseWheel>, Linux uses <Button-4>/<Button-5>
+        def _on_mousewheel(event):
+            widget.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        # Bind to the widget itself
+        widget.bind_all("<MouseWheel>", _on_mousewheel)
+        # Note: In a complex app bind_all can be risky if multiple scroll areas exist.
+        # Better approach for focused scrolling:
+        widget.bind("<Enter>", lambda e: widget.bind_all("<MouseWheel>", _on_mousewheel))
+        widget.bind("<Leave>", lambda e: widget.unbind_all("<MouseWheel>"))
+    
     def show_study_center(self):
         """Show the main study center screen."""
         self.clear_window()
@@ -104,128 +135,105 @@ Study Languages:
         """Show the words study view."""
         self.clear_window()
         
-        frame = ttk.Frame(self.root, padding="20")
-        frame.pack(fill="both", expand=True)
+        main_frame = ttk.Frame(self.root, padding="15")
+        main_frame.pack(fill="both", expand=True)
         
-        # Title Frame
-        title_frame = ttk.Frame(frame)
-        title_frame.pack(fill="x", pady=10)
-        
-        ttk.Label(title_frame, text="Study Words", style="Title.TLabel").pack(side="left")
-        ttk.Button(title_frame, text="+ Add Word", command=self._add_manual_word_dialog).pack(side="right")
-        
-        # Get words
-        words = self.study_manager.get_imported_words()
-        
-        if not words:
-            ttk.Label(frame, text="No words yet. Import via extension or add manually above!").pack(pady=20)
-            ttk.Button(frame, text="← Back", command=self.show_study_center).pack()
-            return
-        
-        # Words listbox
-        list_frame = ttk.Frame(frame)
-        list_frame.pack(fill="both", expand=True, pady=10)
-        
-        ttk.Label(list_frame, text="Select a word to view/edit definition:", font=("Arial", 10)).pack(anchor="w")
-        
-        scrollbar = ttk.Scrollbar(list_frame)
-        scrollbar.pack(side="right", fill="y")
-        
-        self.words_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, height=12, font=("Arial", 10))
-        self.words_listbox.pack(side="left", fill="both", expand=True)
-        self.words_listbox.bind('<<ListboxSelect>>', self._on_word_selected)
-        scrollbar.config(command=self.words_listbox.yview)
-        
-        # Populate listbox
-        for word_data in words:
-            status = "✓" if word_data['has_definition'] else "○"
-            display = f"{status} {word_data['word']}"
-            self.words_listbox.insert(tk.END, display)
-        
-        self.words_data = words
-        
-        # Word detail frame (with scrolling)
-        detail_frame = ttk.LabelFrame(frame, text="Word Definition Editor", padding="10")
-        detail_frame.pack(fill="both", expand=True, pady=5)
-        
-        # Create a scrollable frame for the content
-        canvas = tk.Canvas(detail_frame, bg="white", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(detail_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        # 1. Custom Header
+        self._setup_standard_header(
+            main_frame,
+            "Study Words",
+            back_cmd=self.show_study_center,
+            action_text="+ Add Word",
+            action_cmd=self._add_manual_word_dialog
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        # 2. Main Content (Split View)
+        paned_window = ttk.PanedWindow(main_frame, orient="horizontal")
+        paned_window.pack(fill="both", expand=True)
         
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        # LEFT PANE: Word List
+        left_pane = ttk.Frame(paned_window)
+        paned_window.add(left_pane, weight=1)
         
-        # Word label
-        self.word_label = ttk.Label(scrollable_frame, text="(Select a word)", style="Subtitle.TLabel")
-        self.word_label.pack(pady=3)
+        ttk.Label(left_pane, text="Select Word", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
         
-        # Top section - Definition only
-        ttk.Label(scrollable_frame, text="Definition:", font=("Arial", 9, "bold")).pack(anchor="w", pady=(5, 0))
-        self.word_definition_text = scrolledtext.ScrolledText(scrollable_frame, height=5, font=("Arial", 10), wrap="word")
-        self.word_definition_text.pack(fill="both", pady=3)
+        list_scroll = ttk.Scrollbar(left_pane)
+        list_scroll.pack(side="right", fill="y")
         
-        # Bottom section - Side by side: Examples (left) and Notes (right)
-        bottom_frame = ttk.Frame(scrollable_frame)
-        bottom_frame.pack(fill="both", expand=True, pady=3)
+        self.words_listbox = tk.Listbox(left_pane, yscrollcommand=list_scroll.set, height=12, font=("Arial", 10))
+        self.words_listbox.pack(side="left", fill="both", expand=True)
+        list_scroll.config(command=self.words_listbox.yview)
         
-        # Left side - Examples
-        left_frame = ttk.LabelFrame(bottom_frame, text="Examples:", padding="5")
-        left_frame.pack(side="left", fill="both", expand=True, padx=(0, 3))
+        self.words_listbox.bind('<<ListboxSelect>>', self._on_word_selected)
+        self._bind_mousewheel(self.words_listbox)
         
-        self.word_examples_text = scrolledtext.ScrolledText(left_frame, height=3, font=("Arial", 9), wrap="word")
-        self.word_examples_text.pack(fill="both", expand=True)
+        # Populate List
+        words = self.study_manager.get_imported_words()
+        self.words_data = words
+        if words:
+            for word_data in words:
+                status = "✓" if word_data['has_definition'] else "○"
+                display = f"{status} {word_data['word']}"
+                self.words_listbox.insert(tk.END, display)
+        else:
+            self.words_listbox.insert(tk.END, "(No words found)")
         
-        # Right side - Notes
-        right_frame = ttk.LabelFrame(bottom_frame, text="Notes:", padding="5")
-        right_frame.pack(side="right", fill="both", expand=True, padx=(3, 0))
+        # RIGHT PANE: Detail & Editor
+        right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
+        paned_window.add(right_pane, weight=3)
         
-        self.word_notes_text = scrolledtext.ScrolledText(right_frame, height=3, font=("Arial", 9), wrap="word")
-        self.word_notes_text.pack(fill="both", expand=True)
+        # Selected Word Display (Always Visible)
+        self.word_label = ttk.Label(right_pane, text="(Select a word)", style="Subtitle.TLabel")
+        self.word_label.pack(anchor="w", pady=(0, 10))
         
-        # Generation and action buttons in scrollable area
+        # TABS for Details
+        self.notebook = ttk.Notebook(right_pane)
+        self.notebook.pack(fill="both", expand=True)
+        
+        # TAB 1: Definition
+        tab_def = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_def, text="Definition")
+        
+        self.word_definition_text = scrolledtext.ScrolledText(tab_def, font=("Arial", 10), wrap="word")
+        self.word_definition_text.pack(fill="both", expand=True, pady=(0, 10))
+        self._bind_mousewheel(self.word_definition_text)
+        
+        # AI Actions Row
+        ai_action_frame = ttk.Frame(tab_def)
+        ai_action_frame.pack(fill="x")
+        
         if self.ollama_available:
-            gen_frame = ttk.LabelFrame(scrollable_frame, text="Generate Content:", padding="5")
-            gen_frame.pack(fill="x", pady=5)
+            ttk.Button(ai_action_frame, text="📋 Generate Definition", command=lambda: self._generate_word_content('definition')).pack(side="left", padx=2)
+            ttk.Button(ai_action_frame, text="📝 Generate Explanation", command=lambda: self._generate_word_content('explanation')).pack(side="left", padx=2)
             
-            ttk.Button(
-                gen_frame,
-                text="📋 Definition",
-                command=lambda: self._generate_word_content('definition')
-            ).pack(side="left", padx=3, pady=3)
-            
-            ttk.Button(
-                gen_frame,
-                text="📝 Explanation",
-                command=lambda: self._generate_word_content('explanation')
-            ).pack(side="left", padx=3, pady=3)
-            
-            ttk.Button(
-                gen_frame,
-                text="💬 Examples",
-                command=lambda: self._generate_word_content('examples')
-            ).pack(side="left", padx=3, pady=3)
+        ttk.Button(ai_action_frame, text="Save", command=self._save_word_definition).pack(side="right")
         
-        # Action buttons
-        action_frame = ttk.Frame(scrollable_frame)
-        action_frame.pack(fill="x", pady=8)
+        # TAB 2: Examples & Notes
+        tab_notes = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_notes, text="Examples & Notes")
         
-        ttk.Button(action_frame, text="Save", command=self._save_word_definition).pack(side="left", padx=5)
-        ttk.Button(action_frame, text="Clear", command=self._clear_word_form).pack(side="left", padx=5)
+        notes_paned = ttk.PanedWindow(tab_notes, orient="vertical")
+        notes_paned.pack(fill="both", expand=True)
         
-        # Navigation - outside scrollable area for easy access
-        nav_frame = ttk.Frame(frame)
-        nav_frame.pack(fill="x", pady=10, side="bottom")
+        # Examples Section
+        ex_frame = ttk.LabelFrame(notes_paned, text="Examples", padding="5")
+        notes_paned.add(ex_frame, weight=1)
+        self.word_examples_text = scrolledtext.ScrolledText(ex_frame, height=5, font=("Arial", 10), wrap="word")
+        self.word_examples_text.pack(fill="both", expand=True)
+        self._bind_mousewheel(self.word_examples_text)
         
-        ttk.Button(nav_frame, text="← Back to Study Center", command=self.show_study_center).pack(side="left", padx=5)
+        # AI Button for Examples inside the frame
+        if self.ollama_available:
+             ttk.Button(ex_frame, text="💬 Generate Examples", command=lambda: self._generate_word_content('examples')).pack(anchor="e", pady=2)
+        
+        # Notes Section
+        notes_frame = ttk.LabelFrame(notes_paned, text="My Notes", padding="5")
+        notes_paned.add(notes_frame, weight=1)
+        self.word_notes_text = scrolledtext.ScrolledText(notes_frame, height=5, font=("Arial", 10), wrap="word")
+        self.word_notes_text.pack(fill="both", expand=True)
+        self._bind_mousewheel(self.word_notes_text)
+        
+        ttk.Button(tab_notes, text="Save Changes", command=self._save_word_definition).pack(anchor="e", pady=5)
     
     def _on_word_selected(self, event):
         """Handle word selection from listbox."""
@@ -335,164 +343,142 @@ Study Languages:
         """Show the sentences study view."""
         self.clear_window()
         
-        frame = ttk.Frame(self.root, padding="20")
-        frame.pack(fill="both", expand=True)
+        main_frame = ttk.Frame(self.root, padding="15")
+        main_frame.pack(fill="both", expand=True)
         
-        # Title Frame
-        title_frame = ttk.Frame(frame)
-        title_frame.pack(fill="x", pady=10)
-        
-        ttk.Label(title_frame, text="Study Sentences", style="Title.TLabel").pack(side="left")
-        ttk.Button(title_frame, text="+ Add Sentence", command=self._add_manual_sentence_dialog).pack(side="right")
-        
-        # Get sentences
-        sentences = self.study_manager.get_imported_sentences()
-        
-        if not sentences:
-            ttk.Label(frame, text="No sentences yet. Import via extension or add manually above!").pack(pady=20)
-            ttk.Button(frame, text="← Back", command=self.show_study_center).pack()
-            return
-        
-        # Sentences listbox
-        list_frame = ttk.Frame(frame)
-        list_frame.pack(fill="both", expand=True, pady=10)
-        
-        ttk.Label(list_frame, text="Select a sentence to view/edit explanation:", font=("Arial", 10)).pack(anchor="w")
-        
-        scrollbar = ttk.Scrollbar(list_frame)
-        scrollbar.pack(side="right", fill="y")
-        
-        self.sentences_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, height=10, font=("Arial", 9))
-        self.sentences_listbox.pack(side="left", fill="both", expand=True)
-        self.sentences_listbox.bind('<<ListboxSelect>>', self._on_sentence_selected)
-        scrollbar.config(command=self.sentences_listbox.yview)
-        
-        # Populate listbox
-        for sent_data in sentences:
-            status = "✓" if sent_data['has_explanation'] else "○"
-            display = f"{status} {sent_data['sentence'][:70]}..."
-            self.sentences_listbox.insert(tk.END, display)
-        
-        self.sentences_data = sentences
-        
-        # Sentence detail frame (with scrolling)
-        detail_frame = ttk.LabelFrame(frame, text="Sentence Explanation Editor", padding="10")
-        detail_frame.pack(fill="both", expand=True, pady=5)
-        
-        # Create a scrollable frame for the content
-        canvas = tk.Canvas(detail_frame, bg="white", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(detail_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        # 1. Custom Header
+        self._setup_standard_header(
+            main_frame, 
+            "Study Sentences", 
+            back_cmd=self.show_study_center,
+            action_text="+ Add Sentence",
+            action_cmd=self._add_manual_sentence_dialog
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        # 2. Main Content (Split View)
+        paned_window = ttk.PanedWindow(main_frame, orient="horizontal")
+        paned_window.pack(fill="both", expand=True)
         
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        # LEFT PANE: Sentence List
+        left_pane = ttk.Frame(paned_window)
+        paned_window.add(left_pane, weight=1)
         
-        # Sentence display (read-only) - more compact
-        ttk.Label(scrollable_frame, text="Sentence:", font=("Arial", 9, "bold")).pack(anchor="w", pady=(0, 3))
-        self.sentence_display_text = scrolledtext.ScrolledText(scrollable_frame, height=2, font=("Arial", 10), wrap="word", state="disabled")
-        self.sentence_display_text.pack(fill="x", pady=(0, 8))
+        ttk.Label(left_pane, text="Select Sentence", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
         
-        # Focus area selection (checkboxes) - compact
-        focus_frame = ttk.LabelFrame(scrollable_frame, text="Select Focus Areas:", padding="5")
-        focus_frame.pack(fill="x", pady=5)
+        list_scroll = ttk.Scrollbar(left_pane)
+        list_scroll.pack(side="right", fill="y")
         
-        # Initialize checkbox variables
-        self.focus_vars = {}
-        self.focus_checkboxes = {}
+        self.sentences_listbox = tk.Listbox(left_pane, font=("Arial", 9), yscrollcommand=list_scroll.set, width=30)
+        self.sentences_listbox.pack(side="left", fill="both", expand=True)
+        list_scroll.config(command=self.sentences_listbox.yview)
         
-        # Add checkboxes for each focus area
-        for focus in ["grammar", "vocabulary", "context", "pronunciation", "all"]:
-            self.focus_vars[focus] = tk.BooleanVar(value=False)
-            checkbox = ttk.Checkbutton(
-                focus_frame,
-                text=focus.capitalize(),
-                variable=self.focus_vars[focus]
-            )
-            checkbox.pack(side="left", padx=5)
-            self.focus_checkboxes[focus] = checkbox
+        self.sentences_listbox.bind('<<ListboxSelect>>', self._on_sentence_selected)
+        self._bind_mousewheel(self.sentences_listbox)
         
-        # Set "all" checked by default
-        self.focus_vars['all'].set(True)
+        # Populate List
+        sentences = self.study_manager.get_imported_sentences()
+        self.sentences_data = sentences
+        if sentences:
+            for sent_data in sentences:
+                status = "✓" if sent_data['has_explanation'] else "○"
+                display = f"{status} {sent_data['sentence'][:40]}..."
+                self.sentences_listbox.insert(tk.END, display)
+        else:
+            self.sentences_listbox.insert(tk.END, "(No sentences found)")
         
-        # Top section - Explanation only
-        ttk.Label(scrollable_frame, text="Explanation:", font=("Arial", 9, "bold")).pack(anchor="w", pady=(5, 0))
-        self.sentence_explanation_text = scrolledtext.ScrolledText(scrollable_frame, height=5, font=("Arial", 10), wrap="word")
-        self.sentence_explanation_text.pack(fill="both", pady=3)
+        # RIGHT PANE: Details & Editor
+        right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
+        paned_window.add(right_pane, weight=3)
         
-        # Bottom section - Side by side: Grammar Notes (left) and Personal Notes (right)
-        bottom_frame = ttk.Frame(scrollable_frame)
-        bottom_frame.pack(fill="both", expand=True, pady=3)
+        # Target Sentence Display (Always Visible)
+        target_frame = ttk.LabelFrame(right_pane, text="Target Sentence", padding="10")
+        target_frame.pack(fill="x", pady=(0, 10))
         
-        # Left side - Grammar notes
-        left_frame = ttk.LabelFrame(bottom_frame, text="Grammar Notes:", padding="5")
-        left_frame.pack(side="left", fill="both", expand=True, padx=(0, 3))
+        self.sentence_display_text = scrolledtext.ScrolledText(target_frame, height=3, font=("Arial", 11), wrap="word", state="disabled")
+        self.sentence_display_text.pack(fill="both", expand=True)
+        self._bind_mousewheel(self.sentence_display_text)
         
-        self.sentence_grammar_text = scrolledtext.ScrolledText(left_frame, height=3, font=("Arial", 9), wrap="word")
-        self.sentence_grammar_text.pack(fill="both", expand=True)
+        # TABS for Details
+        self.notebook = ttk.Notebook(right_pane)
+        self.notebook.pack(fill="both", expand=True)
         
-        # Right side - Personal notes
-        right_frame = ttk.LabelFrame(bottom_frame, text="Personal Notes:", padding="5")
-        right_frame.pack(side="right", fill="both", expand=True, padx=(3, 0))
+        # TAB 1: Explanation (AI)
+        tab_explanation = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_explanation, text="AI Explanation")
         
-        self.sentence_notes_text = scrolledtext.ScrolledText(right_frame, height=3, font=("Arial", 9), wrap="word")
-        self.sentence_notes_text.pack(fill="both", expand=True)
+        self.sentence_explanation_text = scrolledtext.ScrolledText(tab_explanation, font=("Arial", 10), wrap="word")
+        self.sentence_explanation_text.pack(fill="both", expand=True, pady=(0, 10))
+        self._bind_mousewheel(self.sentence_explanation_text)
         
-        # Action buttons in scrollable area
-        action_frame = ttk.Frame(scrollable_frame)
-        action_frame.pack(fill="x", pady=10)
+        # AI Actions Row
+        ai_action_frame = ttk.Frame(tab_explanation)
+        ai_action_frame.pack(fill="x")
         
         if self.ollama_available:
-            ttk.Button(
-                action_frame,
-                text="🤖 Generate Explanations",
-                command=self._generate_sentence_explanation_multi
-            ).pack(side="left", padx=5)
+            ttk.Button(ai_action_frame, text="✨ Generate/Regenerate Explanation", command=self._generate_sentence_explanation_multi).pack(side="left")
         
-        ttk.Button(action_frame, text="Save", command=self._save_sentence_explanation).pack(side="left", padx=5)
-        ttk.Button(action_frame, text="Clear", command=self._clear_sentence_form).pack(side="left", padx=5)
+        ttk.Button(ai_action_frame, text="Save Changes", command=self._save_sentence_explanation).pack(side="right")
+
+        # TAB 2: Notes & Grammar
+        tab_notes = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_notes, text="My Notes & Grammar")
         
-        # Follow-up Questions Section
-        followup_frame = ttk.LabelFrame(scrollable_frame, text="💬 Ask Follow-up Questions", padding="10")
-        followup_frame.pack(fill="both", expand=True, pady=10)
+        # Split Notes into Grammar (Top) and Personal (Bottom) or Left/Right
+        notes_paned = ttk.PanedWindow(tab_notes, orient="vertical")
+        notes_paned.pack(fill="both", expand=True)
         
-        # Question input
-        ttk.Label(followup_frame, text="Ask a question about this sentence:", font=("Arial", 9, "bold")).pack(anchor="w", pady=(0, 3))
+        # Grammar Note Section
+        grammar_frame = ttk.LabelFrame(notes_paned, text="Grammar Notes", padding="5")
+        notes_paned.add(grammar_frame, weight=1)
+        self.sentence_grammar_text = scrolledtext.ScrolledText(grammar_frame, height=5, font=("Arial", 10), wrap="word")
+        self.sentence_grammar_text.pack(fill="both", expand=True)
+        self._bind_mousewheel(self.sentence_grammar_text)
         
-        question_input_frame = ttk.Frame(followup_frame)
-        question_input_frame.pack(fill="x", pady=(0, 5))
+        # Personal Note Section
+        personal_frame = ttk.LabelFrame(notes_paned, text="Personal Notes", padding="5")
+        notes_paned.add(personal_frame, weight=1)
+        self.sentence_notes_text = scrolledtext.ScrolledText(personal_frame, height=5, font=("Arial", 10), wrap="word")
+        self.sentence_notes_text.pack(fill="both", expand=True)
+        self._bind_mousewheel(self.sentence_notes_text)
         
-        self.followup_question_text = scrolledtext.ScrolledText(question_input_frame, height=2, font=("Arial", 10), wrap="word")
+        ttk.Button(tab_notes, text="Save Notes", command=self._save_sentence_explanation).pack(anchor="e", pady=5)
+        
+        # TAB 3: Talk to AI (Follow-up)
+        tab_chat = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_chat, text="Ask AI")
+        
+        chat_history_frame = ttk.Frame(tab_chat)
+        chat_history_frame.pack(fill="both", expand=True, pady=(0, 10))
+        
+        self.followup_history_text = scrolledtext.ScrolledText(chat_history_frame, state="disabled", font=("Arial", 10), wrap="word")
+        self.followup_history_text.pack(side="left", fill="both", expand=True)
+        chat_scroll = ttk.Scrollbar(chat_history_frame, command=self.followup_history_text.yview)
+        chat_scroll.pack(side="right", fill="y")
+        self.followup_history_text.config(yscrollcommand=chat_scroll.set)
+        self._bind_mousewheel(self.followup_history_text)
+        
+        input_frame = ttk.Frame(tab_chat)
+        input_frame.pack(fill="x")
+        
+        self.followup_question_text = scrolledtext.ScrolledText(input_frame, height=3, font=("Arial", 10), wrap="word")
         self.followup_question_text.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        self._bind_mousewheel(self.followup_question_text)
         
-        ask_btn = ttk.Button(question_input_frame, text="Ask", command=self._ask_followup_question)
-        ask_btn.pack(side="right")
+        ttk.Button(input_frame, text="Ask", command=self._ask_followup_question).pack(side="right")
+        ttk.Button(tab_chat, text="Clear History", command=self._clear_followup_history).pack(anchor="w", pady=5)
         
-        # Follow-up history display
-        ttk.Label(followup_frame, text="Conversation History:", font=("Arial", 9, "bold")).pack(anchor="w", pady=(10, 3))
+        # TAB 4: Settings (Focus Areas)
+        tab_settings = ttk.Frame(self.notebook, padding="20")
+        self.notebook.add(tab_settings, text="Settings")
         
-        self.followup_history_text = scrolledtext.ScrolledText(followup_frame, height=8, font=("Arial", 9), wrap="word", state="disabled")
-        self.followup_history_text.pack(fill="both", expand=True, pady=(0, 5))
+        ttk.Label(tab_settings, text="Select Focus Areas for AI Generation:", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 10))
         
-        # Clear history button
-        clear_history_btn = ttk.Button(followup_frame, text="Clear History", command=self._clear_followup_history)
-        clear_history_btn.pack(anchor="w")
-        
-        # Store current sentence explanation ID
+        self.focus_vars = {}
+        for focus in ["grammar", "vocabulary", "context", "pronunciation", "all"]:
+            self.focus_vars[focus] = tk.BooleanVar(value=(focus == 'all'))
+            ttk.Checkbutton(tab_settings, text=focus.capitalize(), variable=self.focus_vars[focus]).pack(anchor="w", pady=2)
+            
         self.current_sentence_explanation_id = None
-        
-        # Navigation - outside scrollable area for easy access
-        nav_frame = ttk.Frame(frame)
-        nav_frame.pack(fill="x", pady=10, side="bottom")
-        
-        ttk.Button(nav_frame, text="← Back to Study Center", command=self.show_study_center).pack(side="left", padx=5)
     
     def _on_sentence_selected(self, event):
         """Handle sentence selection from listbox."""
@@ -741,75 +727,76 @@ Study Languages:
         
         main_frame = ttk.Frame(self.root, padding="20")
         main_frame.pack(fill="both", expand=True)
+    def show_grammar_book_view(self):
+        """Show the grammar book view."""
+        self.clear_window()
         
-        # Header
-        header_frame = ttk.Frame(main_frame)
-        header_frame.pack(fill="x", pady=(0, 20))
+        main_frame = ttk.Frame(self.root, padding="15")
+        main_frame.pack(fill="both", expand=True)
         
-        title = ttk.Label(header_frame, text="📒 Grammar Book", style="Title.TLabel")
-        title.pack(side="left")
+        # 1. Custom Header
+        self._setup_standard_header(
+            main_frame,
+            "Grammar Book",
+            back_cmd=self.show_study_center,
+            action_text="+ New Entry",
+            action_cmd=self._new_grammar_entry
+        )
         
-        # Content Area - split into list (left) and editor (right)
-        content_frame = ttk.Frame(main_frame)
-        content_frame.pack(fill="both", expand=True)
+        # 2. Main Content (Split View)
+        paned_window = ttk.PanedWindow(main_frame, orient="horizontal")
+        paned_window.pack(fill="both", expand=True)
         
-        # Left Panel: List and Search
-        left_panel = ttk.Frame(content_frame, width=300)
-        left_panel.pack(side="left", fill="y", padx=(0, 10))
+        # LEFT PANE: Entry List
+        left_pane = ttk.Frame(paned_window)
+        paned_window.add(left_pane, weight=1)
         
-        # Search box
-        search_frame = ttk.Frame(left_panel)
-        search_frame.pack(fill="x", pady=(0, 10))
+        # Search Box
+        search_frame = ttk.Frame(left_pane)
+        search_frame.pack(fill="x", pady=(0, 5))
         ttk.Label(search_frame, text="Search:").pack(side="left")
         self.grammar_search_var = tk.StringVar()
         self.grammar_search_var.trace("w", self._filter_grammar_entries)
-        search_entry = ttk.Entry(search_frame, textvariable=self.grammar_search_var)
-        search_entry.pack(side="left", fill="x", expand=True, padx=5)
+        ttk.Entry(search_frame, textvariable=self.grammar_search_var).pack(side="left", fill="x", expand=True, padx=5)
         
-        # Entries list
-        list_frame = ttk.Frame(left_panel)
-        list_frame.pack(fill="both", expand=True)
+        # List
+        list_scroll = ttk.Scrollbar(left_pane)
+        list_scroll.pack(side="right", fill="y")
         
-        scrollbar = ttk.Scrollbar(list_frame)
-        scrollbar.pack(side="right", fill="y")
-        
-        self.grammar_listbox = tk.Listbox(list_frame, font=("Arial", 10), yscrollcommand=scrollbar.set)
+        self.grammar_listbox = tk.Listbox(left_pane, font=("Arial", 10), yscrollcommand=list_scroll.set)
         self.grammar_listbox.pack(side="left", fill="both", expand=True)
-        scrollbar.config(command=self.grammar_listbox.yview)
+        list_scroll.config(command=self.grammar_listbox.yview)
         
         self.grammar_listbox.bind('<<ListboxSelect>>', self._on_grammar_entry_selected)
+        self._bind_mousewheel(self.grammar_listbox)
         
-        # New Entry Button
-        ttk.Button(left_panel, text="+ New Entry", command=self._new_grammar_entry).pack(fill="x", pady=10)
-        
-        # Right Panel: Editor
-        right_panel = ttk.LabelFrame(content_frame, text="Entry Editor", padding="15")
-        right_panel.pack(side="left", fill="both", expand=True)
+        # RIGHT PANE: Editor
+        right_panel = ttk.LabelFrame(paned_window, text="Entry Editor", padding="15")
+        paned_window.add(right_panel, weight=3)
         
         # Title Input
-        title_input_frame = ttk.Frame(right_panel)
-        title_input_frame.pack(fill="x", pady=(0, 10))
-        ttk.Label(title_input_frame, text="Title:", font=("Arial", 10, "bold")).pack(anchor="w")
+        title_frame = ttk.Frame(right_panel)
+        title_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(title_frame, text="Title:", font=("Arial", 10, "bold")).pack(anchor="w")
         self.grammar_title_var = tk.StringVar()
-        ttk.Entry(title_input_frame, textvariable=self.grammar_title_var, font=("Arial", 11)).pack(fill="x", pady=5)
+        ttk.Entry(title_frame, textvariable=self.grammar_title_var, font=("Arial", 11)).pack(fill="x", pady=(2, 0))
         
         # Tags Input
-        tags_input_frame = ttk.Frame(right_panel)
-        tags_input_frame.pack(fill="x", pady=(0, 10))
-        ttk.Label(tags_input_frame, text="Tags (comma separated):").pack(anchor="w")
+        tags_frame = ttk.Frame(right_panel)
+        tags_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(tags_frame, text="Tags (comma separated):").pack(anchor="w")
         self.grammar_tags_var = tk.StringVar()
-        ttk.Entry(tags_input_frame, textvariable=self.grammar_tags_var).pack(fill="x", pady=5)
+        ttk.Entry(tags_frame, textvariable=self.grammar_tags_var).pack(fill="x", pady=(2, 0))
         
         # AI Generation Button
         if self.ollama_available:
-            ai_frame = ttk.Frame(right_panel)
-            ai_frame.pack(fill="x", pady=(0, 10))
-            ttk.Button(ai_frame, text="✨ Generate Explanation from Title", command=self._generate_grammar_explanation).pack(anchor="w")
+            ttk.Button(right_panel, text="✨ Generate Explanation from Title", command=self._generate_grammar_explanation).pack(anchor="w", pady=(0, 10))
         
         # Content Editor
         ttk.Label(right_panel, text="Content:", font=("Arial", 10, "bold")).pack(anchor="w")
-        self.grammar_content_text = scrolledtext.ScrolledText(right_panel, font=("Arial", 10), height=15)
+        self.grammar_content_text = scrolledtext.ScrolledText(right_panel, font=("Arial", 10))
         self.grammar_content_text.pack(fill="both", expand=True, pady=5)
+        self._bind_mousewheel(self.grammar_content_text)
         
         # Action Buttons
         action_frame = ttk.Frame(right_panel)
@@ -817,11 +804,6 @@ Study Languages:
         
         ttk.Button(action_frame, text="Save Entry", command=self._save_grammar_entry, style="Large.TButton").pack(side="left", padx=5)
         ttk.Button(action_frame, text="Delete", command=self._delete_grammar_entry).pack(side="left", padx=5)
-        
-        # Navigation
-        nav_frame = ttk.Frame(main_frame)
-        nav_frame.pack(fill="x", pady=10, side="bottom")
-        ttk.Button(nav_frame, text="← Back to Study Center", command=self.show_study_center).pack(side="left")
         
         # Load entries
         self.current_grammar_id = None
