@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, scrolledtext
+import threading
 from database import FlashcardDatabase
 from spaced_repetition import get_due_flashcards, get_next_review_date
 from flashcard import Flashcard
@@ -22,6 +23,10 @@ class FlashcardApp:
         # Initialize study manager
         self.study_manager = StudyManager(self.db, self.ollama_client)
         self.study_gui = StudyGUI(self.root, self.db, self.study_manager)
+        
+        # Pre-load Ollama model in background if enabled
+        if self.ollama_available and self.study_manager.get_preload_on_startup():
+            self._preload_ollama_background()
         
         self.current_deck_id = None
         self.current_flashcards = []
@@ -659,6 +664,12 @@ Average Interval: {avg_interval:.1f} days
         timeout_spinbox.pack(side="left")
         ttk.Label(timeout_frame, text="  (30-600 seconds, higher for slower hardware)", font=("Arial", 9)).pack(side="left")
         
+        # Pre-load setting
+        preload_var = tk.BooleanVar(value=self.study_manager.get_preload_on_startup())
+        preload_checkbox = ttk.Checkbutton(ollama_frame, text="Pre-load model on startup", variable=preload_var)
+        preload_checkbox.pack(anchor="w", pady=(15, 5))
+        ttk.Label(ollama_frame, text="  Ensures near-instant response for first query (uses background RAM/VRAM)", font=("Arial", 9)).pack(anchor="w")
+        
         # Info label
         info_text = """
 Ollama Settings:
@@ -809,6 +820,7 @@ Note: Changes take effect immediately after clicking Save.
             self.study_manager.set_study_language(study_var.get())
             self.study_manager.set_definition_language_preference(def_pref_var.get())
             self.study_manager.set_explanation_language_preference(exp_pref_var.get())
+            self.study_manager.set_preload_on_startup(preload_var.get())
             
             # Save custom prompts (only if they differ from defaults)
             from prompts import WORD_PROMPTS, SENTENCE_PROMPTS
@@ -841,6 +853,20 @@ Note: Changes take effect immediately after clicking Save.
         
         cancel_btn = ttk.Button(button_frame, text="Cancel", command=dialog.destroy, style="Large.TButton")
         cancel_btn.pack(side="left", padx=5, fill="both", expand=True)
+
+    def _preload_ollama_background(self):
+        """Start a background thread to pre-load the Ollama model."""
+        def preload_worker():
+            try:
+                # Use the configured model from study manager
+                model = self.study_manager.get_ollama_model()
+                if model:
+                    self.ollama_client.preload_model(model)
+            except Exception as e:
+                print(f"Background pre-load error: {e}")
+        
+        thread = threading.Thread(target=preload_worker, daemon=True)
+        thread.start()
 
 
 def main():

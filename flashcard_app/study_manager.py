@@ -39,6 +39,11 @@ class StudyManager:
         self.prefer_native_explanations = self._get_setting('prefer_native_explanations', 'false') == 'true'
         self.request_timeout = int(self._get_setting('request_timeout', '120'))
         self.ollama_model = self._get_setting('ollama_model', '')
+        self.preload_on_startup = self._get_setting('preload_on_startup', 'true') == 'true'
+        
+        # Ensure ollama client uses the configured model
+        if self.ollama_client and self.ollama_model:
+            self.ollama_client.set_model(self.ollama_model)
     
     # ========== SETTINGS MANAGEMENT ==========
     
@@ -98,6 +103,15 @@ class StudyManager:
     def get_ollama_model(self) -> str:
         """Get the currently configured Ollama model."""
         return self.ollama_model
+
+    def set_preload_on_startup(self, enabled: bool):
+        """Set whether to pre-load the model on app startup."""
+        self._set_setting('preload_on_startup', 'true' if enabled else 'false')
+        self.preload_on_startup = enabled
+        
+    def get_preload_on_startup(self) -> bool:
+        """Get whether pre-loading is enabled."""
+        return self.preload_on_startup
     
     def get_available_ollama_models(self) -> List[str]:
         """Get list of available Ollama models."""
@@ -634,9 +648,224 @@ class StudyManager:
                 return False, "Failed to generate explanations"
         except Exception as e:
             return False, f"Error: {str(e)}"
+    
+    # ========== GRAMMAR FOLLOW-UPS ==========
+    
+    def ask_grammar_followup(self, sentence_explanation_id: int, question: str) -> Tuple[bool, str]:
+        """
+        Ask a follow-up question about a sentence explanation with full context.
+        
+        Args:
+            sentence_explanation_id: ID of the sentence explanation
+            question: The follow-up question
+            
+        Returns:
+            Tuple of (success: bool, answer: str)
+        """
+        if not self.ollama_client or not self.ollama_client.is_available():
+            return False, "Ollama is not available"
+        
+        # Get the sentence explanation
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            SELECT sentence, explanation, explanation_language
+            FROM sentence_explanations
+            WHERE id = ?
+        """, (sentence_explanation_id,))
+        
+        result = cursor.fetchone()
+        if not result:
+            return False, "Sentence explanation not found"
+        
+        sentence, explanation, explanation_language = result
+        
+        # Get previous follow-ups for context
+        previous_followups = self.db.get_grammar_followups(sentence_explanation_id)
+        
+        # Build context-aware prompt
+        target_lang = self.native_language if explanation_language == 'native' else self.study_language
+        
+        prompt = f"""You are a {self.study_language} language tutor helping a student understand grammar.
+
+Original sentence: "{sentence}"
+
+Original explanation:
+{explanation}
+"""
+        
+        # Add conversation history if exists
+        if previous_followups:
+            prompt += "\n\nPrevious questions and answers:\n"
+            for i, followup in enumerate(previous_followups, 1):
+                prompt += f"\nQ{i}: {followup['question']}\nA{i}: {followup['answer']}\n"
+        
+        prompt += f"""
+New question from student: {question}
+
+Please provide a clear, helpful answer in {target_lang}. Reference the original sentence and previous discussion when relevant. Be specific and provide examples when helpful."""
+        
+        try:
+            answer = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            if answer:
+                # Store the follow-up
+                self.db.add_grammar_followup(
+                    sentence_explanation_id,
+                    question,
+                    answer,
+                    context=sentence
+                )
+                return True, answer
+            else:
+                return False, "Failed to generate answer"
         except Exception as e:
             return False, f"Error: {str(e)}"
     
+    # ========== GRAMMAR BOOK MANAGEMENT ==========
+    
+    def generate_grammar_explanation(self, topic: str) -> Tuple[bool, str]:
+        """
+        Generate a grammar explanation using Ollama.
+        
+        Args:
+            topic: The grammar topic to explain (e.g., "-고 싶다 meaning")
+            
+        Returns:
+            Tuple of (success: bool, content: str)
+        """
+        if not self.ollama_client or not self.ollama_client.is_available():
+            return False, "Ollama is not available"
+        
+        prompt = f"""You are a {self.study_language} language tutor. 
+        
+Please explain the following grammar topic: "{topic}"
+
+Target Audience: A student whose native language is {self.native_language}.
+
+Structure your explanation as follows:
+# {topic}
+
+## Meaning
+Briefly explain what this grammar point means.
+
+## Usage
+Explain how and when to use it (conjugation rules, etc.).
+
+## Examples
+Provide 3-5 example sentences in {self.study_language} with {self.native_language} translations.
+- Example 1
+- Example 2
+- Example 3
+
+## Notes
+Any important exceptions or nuances.
+"""
+        
+        try:
+            content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            if content:
+                return True, content
+            else:
+                return False, "Failed to generate explanation"
+        except Exception as e:
+            return False, f"Error: {str(e)}"
+    
+    def add_grammar_entry(self, title: str, content: str, tags: str = "") -> int:
+        """Add a grammar book entry."""
+        return self.db.add_grammar_entry(title, content, self.study_language, tags)
+    
+    def update_grammar_entry(self, entry_id: int, title: str, content: str, tags: str) -> bool:
+        """Update a grammar book entry."""
+        return self.db.update_grammar_entry(entry_id, title, content, self.study_language, tags)
+    
+    def delete_grammar_entry(self, entry_id: int) -> bool:
+        """Delete a grammar book entry."""
+        return self.db.delete_grammar_entry(entry_id)
+    
+    def get_grammar_entries(self, search_query: str = "") -> List[Dict]:
+        """Get grammar book entries."""
+        # We could filter by language here if the DB supports mixed languages, 
+        # currently DB stores language column but get_grammar_entries doesn't filter by it strictly yet.
+        # Ideally, we should filter by self.study_language if we want language separation.
+        return self.db.get_grammar_entries(search_query)
+
+    # ========== MANUAL CONTENT ENTRY ==========
+    
+    def add_manual_word(self, word: str, context: str = "", definition: str = "") -> Tuple[bool, str]:
+        """
+        Manually add a word to the database.
+        
+        Args:
+            word: The word to add
+            context: Optional context sentence
+            definition: Optional manual definition
+            
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            # 1. Add to imported_content
+            # Check if updated database.py has add_manual_content method? 
+            # Currently database.py has add_imported_content but it takes many args.
+            # We can use add_imported_content with source="manual"
+            # Wait, database.py add_imported_content signature: 
+            # (content_type, content, context, title, url, language, tags)
+            
+            content_id = self.db.add_imported_content(
+                content_type='word',
+                content=word,
+                context=context,
+                title='Manual Entry',
+                url='manual',
+                language=self.study_language,
+                tags='manual'
+            )
+            
+            # 2. Add definition if provided
+            if definition:
+                self.db.add_word_definition(
+                    imported_content_id=content_id,
+                    word=word,
+                    definition=definition,
+                    definition_language=self.native_language,
+                    source='user'
+                )
+                
+            return True, "Word added successfully"
+        except Exception as e:
+            return False, f"Error adding word: {str(e)}"
+
+    def add_manual_sentence(self, sentence: str, notes: str = "") -> Tuple[bool, str]:
+        """
+        Manually add a sentence to the database.
+        
+        Args:
+            sentence: The sentence to add
+            notes: Optional user notes
+            
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            content_id = self.db.add_imported_content(
+                content_type='sentence',
+                content=sentence,
+                context=sentence, # Context is the sentence itself
+                title='Manual Entry',
+                url='manual',
+                language=self.study_language,
+                tags='manual'
+            )
+            
+            if notes:
+                # We can create a partial sentence explanation or just leave it for the user to generate later
+                # Currently we don't have a direct "add_sentence_explanation" method exposed easily with just notes
+                # But we can assume the user will generate the explanation later.
+                pass
+                
+            return True, "Sentence added successfully"
+        except Exception as e:
+            return False, f"Error adding sentence: {str(e)}"
+            
     # ========== STUDY STATISTICS ==========
     
     def get_study_statistics(self) -> Dict:

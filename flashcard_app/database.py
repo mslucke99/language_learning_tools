@@ -100,6 +100,33 @@ class FlashcardDatabase:
             )
         """)
         
+        # Create grammar_followups table for follow-up questions on sentence explanations
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS grammar_followups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sentence_explanation_id INTEGER NOT NULL,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                context TEXT,  -- The original sentence for reference
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (sentence_explanation_id) REFERENCES sentence_explanations (id) ON DELETE CASCADE
+            )
+        """)
+
+        # Create grammar_book_entries table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS grammar_book_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                language TEXT,
+                tags TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT
+            )
+        """)
+        
+        self.conn.commit()
         self.conn.commit()
 
     def create_deck(self, name: str, description: str = "") -> int:
@@ -390,6 +417,140 @@ class FlashcardDatabase:
             "processed": processed_counts.get(True, 0),
             "unprocessed": processed_counts.get(False, 0)
         }
+    
+    # ===== GRAMMAR FOLLOW-UP METHODS =====
+    
+    def add_grammar_followup(self, sentence_explanation_id: int, question: str, 
+                            answer: str, context: str = "") -> int:
+        """Add a grammar follow-up question and answer."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO grammar_followups 
+            (sentence_explanation_id, question, answer, context, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (sentence_explanation_id, question, answer, context, datetime.now().isoformat()))
+        self.conn.commit()
+        return cursor.lastrowid
+    
+    def get_grammar_followups(self, sentence_explanation_id: int) -> list[dict]:
+        """Get all grammar follow-ups for a sentence explanation."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, question, answer, context, created_at
+            FROM grammar_followups
+            WHERE sentence_explanation_id = ?
+            ORDER BY created_at ASC
+        """, (sentence_explanation_id,))
+        
+        followups = []
+        for row in cursor.fetchall():
+            followups.append({
+                "id": row[0],
+                "question": row[1],
+                "answer": row[2],
+                "context": row[3],
+                "created_at": row[4]
+            })
+        return followups
+    
+    def delete_grammar_followup(self, followup_id: int) -> bool:
+        """Delete a specific grammar follow-up."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM grammar_followups WHERE id = ?", (followup_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+    
+    def clear_grammar_followups(self, sentence_explanation_id: int) -> bool:
+        """Clear all follow-ups for a sentence explanation."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM grammar_followups WHERE sentence_explanation_id = ?", 
+                      (sentence_explanation_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    # ===== GRAMMAR BOOK METHODS =====
+
+    def add_grammar_entry(self, title: str, content: str, language: str = "", tags: str = "") -> int:
+        """Add a new entry to the grammar book."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO grammar_book_entries 
+            (title, content, language, tags, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (title, content, language, tags, datetime.now().isoformat(), datetime.now().isoformat()))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_grammar_entries(self, search_query: str = "") -> list[dict]:
+        """Get all grammar book entries, optionally filtered by search query."""
+        cursor = self.conn.cursor()
+        if search_query:
+            query = """
+                SELECT id, title, content, language, tags, created_at, updated_at
+                FROM grammar_book_entries
+                WHERE title LIKE ? OR content LIKE ? OR tags LIKE ?
+                ORDER BY updated_at DESC
+            """
+            search_pattern = f"%{search_query}%"
+            cursor.execute(query, (search_pattern, search_pattern, search_pattern))
+        else:
+            cursor.execute("""
+                SELECT id, title, content, language, tags, created_at, updated_at
+                FROM grammar_book_entries
+                ORDER BY updated_at DESC
+            """)
+        
+        entries = []
+        for row in cursor.fetchall():
+            entries.append({
+                "id": row[0],
+                "title": row[1],
+                "content": row[2],
+                "language": row[3],
+                "tags": row[4],
+                "created_at": row[5],
+                "updated_at": row[6]
+            })
+        return entries
+
+    def get_grammar_entry(self, entry_id: int) -> dict:
+        """Get a specific grammar book entry."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, title, content, language, tags, created_at, updated_at
+            FROM grammar_book_entries
+            WHERE id = ?
+        """, (entry_id,))
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row[0],
+                "title": row[1],
+                "content": row[2],
+                "language": row[3],
+                "tags": row[4],
+                "created_at": row[5],
+                "updated_at": row[6]
+            }
+        return None
+
+    def update_grammar_entry(self, entry_id: int, title: str, content: str, language: str, tags: str) -> bool:
+        """Update an existing grammar book entry."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            UPDATE grammar_book_entries
+            SET title = ?, content = ?, language = ?, tags = ?, updated_at = ?
+            WHERE id = ?
+        """, (title, content, language, tags, datetime.now().isoformat(), entry_id))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_grammar_entry(self, entry_id: int) -> bool:
+        """Delete a grammar book entry."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM grammar_book_entries WHERE id = ?", (entry_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
 
     def close(self):
         self.conn.close()

@@ -203,6 +203,42 @@ Provide:
             print(f"Error translating: {e}")
             return None
     
+    def preload_model(self, model_name: str = None) -> bool:
+        """
+        Pre-load a model into Ollama's memory without generating a response.
+        
+        Args:
+            model_name: Optional model name to load. If None, uses self.model.
+            
+        Returns:
+            True if pre-load request was successful
+        """
+        if not HAS_REQUESTS:
+            return False
+            
+        target_model = model_name or self.model
+        if not target_model:
+            return False
+            
+        try:
+            print(f'[OLLAMA] Pre-loading model: {target_model}', flush=True)
+            # Ollama pre-loads a model when you send an empty prompt or a prompt with keep_alive
+            # Setting keep_alive to -1 keeps it in memory indefinitely
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": target_model,
+                    "prompt": "",
+                    "stream": False,
+                    "keep_alive": -1 # Keep in memory indefinitely for pre-load
+                },
+                timeout=30 # Short timeout for pre-load request
+            )
+            return response.status_code == 200
+        except Exception as e:
+            print(f'[OLLAMA] Pre-load failed: {e}', flush=True)
+            return False
+
     def generate_response(self, prompt: str, timeout: int = 60) -> str:
         """
         Generate a response from the Ollama model given a prompt.
@@ -217,13 +253,14 @@ Provide:
         """
         return self._query_model(prompt, timeout)
     
-    def _query_model(self, prompt: str, timeout: int = 60) -> str:
+    def _query_model(self, prompt: str, timeout: int = 60, keep_alive: str = "5m") -> str:
         """
         Query the Ollama model with a prompt.
         
         Args:
             prompt: The prompt to send
             timeout: Request timeout in seconds (default 60 for slow hardware)
+            keep_alive: How long to keep the model in memory after request (default "5m")
         
         Returns:
             Model response
@@ -244,6 +281,7 @@ Provide:
                     "prompt": prompt,
                     "stream": False,
                     "temperature": 0.7,
+                    "keep_alive": keep_alive
                 },
                 timeout=timeout
             )

@@ -83,6 +83,15 @@ Study Languages:
             style="Large.TButton"
         )
         sentences_btn.pack(side="left", padx=10, fill="both", expand=True)
+
+        # Grammar Book button
+        grammar_btn = ttk.Button(
+            btn_frame,
+            text="📒 Grammar Book",
+            command=self.show_grammar_book_view,
+            style="Large.TButton"
+        )
+        grammar_btn.pack(side="left", padx=10, fill="both", expand=True)
         
         # Back button
         back_btn = ttk.Button(frame, text="← Back to Main Menu", command=self.on_close)
@@ -98,15 +107,18 @@ Study Languages:
         frame = ttk.Frame(self.root, padding="20")
         frame.pack(fill="both", expand=True)
         
-        # Title
-        title = ttk.Label(frame, text="Study Words", style="Title.TLabel")
-        title.pack(pady=10)
+        # Title Frame
+        title_frame = ttk.Frame(frame)
+        title_frame.pack(fill="x", pady=10)
+        
+        ttk.Label(title_frame, text="Study Words", style="Title.TLabel").pack(side="left")
+        ttk.Button(title_frame, text="+ Add Word", command=self._add_manual_word_dialog).pack(side="right")
         
         # Get words
         words = self.study_manager.get_imported_words()
         
         if not words:
-            ttk.Label(frame, text="No words imported yet. Import words using the browser extension!").pack(pady=20)
+            ttk.Label(frame, text="No words yet. Import via extension or add manually above!").pack(pady=20)
             ttk.Button(frame, text="← Back", command=self.show_study_center).pack()
             return
         
@@ -326,15 +338,18 @@ Study Languages:
         frame = ttk.Frame(self.root, padding="20")
         frame.pack(fill="both", expand=True)
         
-        # Title
-        title = ttk.Label(frame, text="Study Sentences", style="Title.TLabel")
-        title.pack(pady=10)
+        # Title Frame
+        title_frame = ttk.Frame(frame)
+        title_frame.pack(fill="x", pady=10)
+        
+        ttk.Label(title_frame, text="Study Sentences", style="Title.TLabel").pack(side="left")
+        ttk.Button(title_frame, text="+ Add Sentence", command=self._add_manual_sentence_dialog).pack(side="right")
         
         # Get sentences
         sentences = self.study_manager.get_imported_sentences()
         
         if not sentences:
-            ttk.Label(frame, text="No sentences imported yet. Import sentences using the browser extension!").pack(pady=20)
+            ttk.Label(frame, text="No sentences yet. Import via extension or add manually above!").pack(pady=20)
             ttk.Button(frame, text="← Back", command=self.show_study_center).pack()
             return
         
@@ -444,6 +459,35 @@ Study Languages:
         ttk.Button(action_frame, text="Save", command=self._save_sentence_explanation).pack(side="left", padx=5)
         ttk.Button(action_frame, text="Clear", command=self._clear_sentence_form).pack(side="left", padx=5)
         
+        # Follow-up Questions Section
+        followup_frame = ttk.LabelFrame(scrollable_frame, text="💬 Ask Follow-up Questions", padding="10")
+        followup_frame.pack(fill="both", expand=True, pady=10)
+        
+        # Question input
+        ttk.Label(followup_frame, text="Ask a question about this sentence:", font=("Arial", 9, "bold")).pack(anchor="w", pady=(0, 3))
+        
+        question_input_frame = ttk.Frame(followup_frame)
+        question_input_frame.pack(fill="x", pady=(0, 5))
+        
+        self.followup_question_text = scrolledtext.ScrolledText(question_input_frame, height=2, font=("Arial", 10), wrap="word")
+        self.followup_question_text.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        
+        ask_btn = ttk.Button(question_input_frame, text="Ask", command=self._ask_followup_question)
+        ask_btn.pack(side="right")
+        
+        # Follow-up history display
+        ttk.Label(followup_frame, text="Conversation History:", font=("Arial", 9, "bold")).pack(anchor="w", pady=(10, 3))
+        
+        self.followup_history_text = scrolledtext.ScrolledText(followup_frame, height=8, font=("Arial", 9), wrap="word", state="disabled")
+        self.followup_history_text.pack(fill="both", expand=True, pady=(0, 5))
+        
+        # Clear history button
+        clear_history_btn = ttk.Button(followup_frame, text="Clear History", command=self._clear_followup_history)
+        clear_history_btn.pack(anchor="w")
+        
+        # Store current sentence explanation ID
+        self.current_sentence_explanation_id = None
+        
         # Navigation - outside scrollable area for easy access
         nav_frame = ttk.Frame(frame)
         nav_frame.pack(fill="x", pady=10, side="bottom")
@@ -477,6 +521,10 @@ Study Languages:
         for focus in self.focus_vars:
             self.focus_vars[focus].set(False)
         
+        # Clear follow-up question input and history
+        self.followup_question_text.delete(1.0, tk.END)
+        self.current_sentence_explanation_id = None
+        
         if explanation:
             self.sentence_explanation_text.insert(tk.END, explanation['explanation'])
             self.sentence_grammar_text.insert(tk.END, explanation['grammar_notes'])
@@ -484,9 +532,20 @@ Study Languages:
             # Set checkbox for the focus area if stored
             if explanation.get('focus_area') and explanation['focus_area'] in self.focus_vars:
                 self.focus_vars[explanation['focus_area']].set(True)
+            
+            # Store explanation ID for follow-ups
+            self.current_sentence_explanation_id = explanation['id']
+            
+            # Load follow-up history
+            self._load_followup_history()
         else:
             # Default to "all" if no explanation exists
             self.focus_vars['all'].set(True)
+            # Clear follow-up history
+            self.followup_history_text.config(state="normal")
+            self.followup_history_text.delete(1.0, tk.END)
+            self.followup_history_text.insert(tk.END, "(No explanation yet. Generate or enter an explanation first.)")
+            self.followup_history_text.config(state="disabled")
     
     def _save_sentence_explanation(self):
         """Save the sentence explanation."""
@@ -594,7 +653,350 @@ Study Languages:
             self.sentence_explanation_text.insert(tk.END, original_text)
             messagebox.showerror("Error", result)
     
+    # ========== FOLLOW-UP QUESTIONS ==========
     
+    def _ask_followup_question(self):
+        """Ask a follow-up question about the current sentence."""
+        if not self.current_sentence_explanation_id:
+            messagebox.showwarning("Warning", "Please save an explanation first before asking follow-up questions")
+            return
+        
+        question = self.followup_question_text.get(1.0, tk.END).strip()
+        if not question:
+            messagebox.showwarning("Warning", "Please enter a question")
+            return
+        
+        # Show loading in history
+        self.followup_history_text.config(state="normal")
+        self.followup_history_text.insert(tk.END, f"\n\n🤔 Q: {question}\n🔄 Generating answer...\n")
+        self.followup_history_text.see(tk.END)
+        self.followup_history_text.config(state="disabled")
+        self.root.update()
+        
+        # Ask the question
+        success, answer = self.study_manager.ask_grammar_followup(
+            self.current_sentence_explanation_id,
+            question
+        )
+        
+        # Update history with answer
+        self.followup_history_text.config(state="normal")
+        # Remove loading message
+        content = self.followup_history_text.get(1.0, tk.END)
+        content = content.replace("🔄 Generating answer...\n", "")
+        self.followup_history_text.delete(1.0, tk.END)
+        self.followup_history_text.insert(1.0, content)
+        
+        if success:
+            self.followup_history_text.insert(tk.END, f"💡 A: {answer}\n")
+        else:
+            self.followup_history_text.insert(tk.END, f"❌ Error: {answer}\n")
+        
+        self.followup_history_text.see(tk.END)
+        self.followup_history_text.config(state="disabled")
+        
+        # Clear question input
+        self.followup_question_text.delete(1.0, tk.END)
+        
+        if not success:
+            messagebox.showerror("Error", answer)
+    
+    def _load_followup_history(self):
+        """Load and display follow-up history for the current sentence."""
+        if not self.current_sentence_explanation_id:
+            return
+        
+        followups = self.db.get_grammar_followups(self.current_sentence_explanation_id)
+        
+        self.followup_history_text.config(state="normal")
+        self.followup_history_text.delete(1.0, tk.END)
+        
+        if not followups:
+            self.followup_history_text.insert(tk.END, "(No follow-up questions yet. Ask a question above!)")
+        else:
+            for i, followup in enumerate(followups, 1):
+                self.followup_history_text.insert(tk.END, f"🤔 Q{i}: {followup['question']}\n")
+                self.followup_history_text.insert(tk.END, f"💡 A{i}: {followup['answer']}\n\n")
+        
+        self.followup_history_text.config(state="disabled")
+    
+    def _clear_followup_history(self):
+        """Clear all follow-up questions for the current sentence."""
+        if not self.current_sentence_explanation_id:
+            messagebox.showwarning("Warning", "No sentence selected")
+            return
+        
+        if messagebox.askyesno("Clear History", "Clear all follow-up questions for this sentence?"):
+            self.db.clear_grammar_followups(self.current_sentence_explanation_id)
+            self._load_followup_history()
+            messagebox.showinfo("Success", "Follow-up history cleared")
+    
+    
+    
+    # ========== GRAMMAR BOOK VIEW ==========
+    
+    def show_grammar_book_view(self):
+        """Show the grammar book view."""
+        self.clear_window()
+        
+        main_frame = ttk.Frame(self.root, padding="20")
+        main_frame.pack(fill="both", expand=True)
+        
+        # Header
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill="x", pady=(0, 20))
+        
+        title = ttk.Label(header_frame, text="📒 Grammar Book", style="Title.TLabel")
+        title.pack(side="left")
+        
+        # Content Area - split into list (left) and editor (right)
+        content_frame = ttk.Frame(main_frame)
+        content_frame.pack(fill="both", expand=True)
+        
+        # Left Panel: List and Search
+        left_panel = ttk.Frame(content_frame, width=300)
+        left_panel.pack(side="left", fill="y", padx=(0, 10))
+        
+        # Search box
+        search_frame = ttk.Frame(left_panel)
+        search_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(search_frame, text="Search:").pack(side="left")
+        self.grammar_search_var = tk.StringVar()
+        self.grammar_search_var.trace("w", self._filter_grammar_entries)
+        search_entry = ttk.Entry(search_frame, textvariable=self.grammar_search_var)
+        search_entry.pack(side="left", fill="x", expand=True, padx=5)
+        
+        # Entries list
+        list_frame = ttk.Frame(left_panel)
+        list_frame.pack(fill="both", expand=True)
+        
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side="right", fill="y")
+        
+        self.grammar_listbox = tk.Listbox(list_frame, font=("Arial", 10), yscrollcommand=scrollbar.set)
+        self.grammar_listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=self.grammar_listbox.yview)
+        
+        self.grammar_listbox.bind('<<ListboxSelect>>', self._on_grammar_entry_selected)
+        
+        # New Entry Button
+        ttk.Button(left_panel, text="+ New Entry", command=self._new_grammar_entry).pack(fill="x", pady=10)
+        
+        # Right Panel: Editor
+        right_panel = ttk.LabelFrame(content_frame, text="Entry Editor", padding="15")
+        right_panel.pack(side="left", fill="both", expand=True)
+        
+        # Title Input
+        title_input_frame = ttk.Frame(right_panel)
+        title_input_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(title_input_frame, text="Title:", font=("Arial", 10, "bold")).pack(anchor="w")
+        self.grammar_title_var = tk.StringVar()
+        ttk.Entry(title_input_frame, textvariable=self.grammar_title_var, font=("Arial", 11)).pack(fill="x", pady=5)
+        
+        # Tags Input
+        tags_input_frame = ttk.Frame(right_panel)
+        tags_input_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(tags_input_frame, text="Tags (comma separated):").pack(anchor="w")
+        self.grammar_tags_var = tk.StringVar()
+        ttk.Entry(tags_input_frame, textvariable=self.grammar_tags_var).pack(fill="x", pady=5)
+        
+        # AI Generation Button
+        if self.ollama_available:
+            ai_frame = ttk.Frame(right_panel)
+            ai_frame.pack(fill="x", pady=(0, 10))
+            ttk.Button(ai_frame, text="✨ Generate Explanation from Title", command=self._generate_grammar_explanation).pack(anchor="w")
+        
+        # Content Editor
+        ttk.Label(right_panel, text="Content:", font=("Arial", 10, "bold")).pack(anchor="w")
+        self.grammar_content_text = scrolledtext.ScrolledText(right_panel, font=("Arial", 10), height=15)
+        self.grammar_content_text.pack(fill="both", expand=True, pady=5)
+        
+        # Action Buttons
+        action_frame = ttk.Frame(right_panel)
+        action_frame.pack(fill="x", pady=10)
+        
+        ttk.Button(action_frame, text="Save Entry", command=self._save_grammar_entry, style="Large.TButton").pack(side="left", padx=5)
+        ttk.Button(action_frame, text="Delete", command=self._delete_grammar_entry).pack(side="left", padx=5)
+        
+        # Navigation
+        nav_frame = ttk.Frame(main_frame)
+        nav_frame.pack(fill="x", pady=10, side="bottom")
+        ttk.Button(nav_frame, text="← Back to Study Center", command=self.show_study_center).pack(side="left")
+        
+        # Load entries
+        self.current_grammar_id = None
+        self._load_grammar_entries()
+        
+    def _load_grammar_entries(self):
+        """Load grammar entries into listbox."""
+        search = self.grammar_search_var.get()
+        self.grammar_entries = self.study_manager.get_grammar_entries(search)
+        
+        self.grammar_listbox.delete(0, tk.END)
+        for entry in self.grammar_entries:
+            self.grammar_listbox.insert(tk.END, entry['title'])
+            
+    def _filter_grammar_entries(self, *args):
+        """Filter entries based on search."""
+        self._load_grammar_entries()
+        
+    def _on_grammar_entry_selected(self, event):
+        """Handle selection of a grammar entry."""
+        selection = self.grammar_listbox.curselection()
+        if not selection:
+            return
+            
+        index = selection[0]
+        entry = self.grammar_entries[index]
+        self.current_grammar_id = entry['id']
+        
+        self.grammar_title_var.set(entry['title'])
+        self.grammar_tags_var.set(entry['tags'] or "")
+        self.grammar_content_text.delete(1.0, tk.END)
+        self.grammar_content_text.insert(tk.END, entry['content'])
+        
+    def _new_grammar_entry(self):
+        """Clear editor for new entry."""
+        self.current_grammar_id = None
+        self.grammar_title_var.set("")
+        self.grammar_tags_var.set("")
+        self.grammar_content_text.delete(1.0, tk.END)
+        self.grammar_listbox.selection_clear(0, tk.END)
+        
+    def _save_grammar_entry(self):
+        """Save the current grammar entry."""
+        title = self.grammar_title_var.get().strip()
+        content = self.grammar_content_text.get(1.0, tk.END).strip()
+        tags = self.grammar_tags_var.get().strip()
+        
+        if not title:
+            messagebox.showwarning("Warning", "Title is required")
+            return
+            
+        if not content:
+            messagebox.showwarning("Warning", "Content is required")
+            return
+            
+        if self.current_grammar_id:
+            self.study_manager.update_grammar_entry(self.current_grammar_id, title, content, tags)
+        else:
+            self.study_manager.add_grammar_entry(title, content, tags)
+            
+        self._load_grammar_entries()
+        self._new_grammar_entry()
+        messagebox.showinfo("Success", "Entry saved!")
+        
+    def _delete_grammar_entry(self):
+        """Delete the current grammar entry."""
+        if not self.current_grammar_id:
+            return
+            
+        if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this entry?"):
+            self.study_manager.delete_grammar_entry(self.current_grammar_id)
+            self._load_grammar_entries()
+            self._new_grammar_entry()
+            
+    def _generate_grammar_explanation(self):
+        """Generate grammar explanation using AI."""
+        topic = self.grammar_title_var.get().strip()
+        if not topic:
+            messagebox.showwarning("Warning", "Please enter a title (topic) first")
+            return
+            
+        self.grammar_content_text.delete(1.0, tk.END)
+        self.grammar_content_text.insert(tk.END, "🔄 Generating explanation... Please wait.")
+        self.root.update()
+        
+        success, content = self.study_manager.generate_grammar_explanation(topic)
+        
+        self.grammar_content_text.delete(1.0, tk.END)
+        if success:
+            self.grammar_content_text.insert(tk.END, content)
+        else:
+            self.grammar_content_text.insert(tk.END, f"Error: {content}")
+            
+            
+    
+    # ========== MANUAL ENTRY METHODS ==========
+
+    def _add_manual_word_dialog(self):
+        """Show dialog to manually add a word."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add New Word")
+        dialog.geometry("400x350")
+        
+        ttk.Label(dialog, text="Add New Word", font=("Arial", 12, "bold")).pack(pady=10)
+        
+        # Word
+        ttk.Label(dialog, text="Word/Phrase (Target Language):").pack(anchor="w", padx=20)
+        word_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=word_var, width=40).pack(padx=20, pady=(0, 10))
+        
+        # Definition
+        ttk.Label(dialog, text="Definition (Optional):").pack(anchor="w", padx=20)
+        def_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=def_var, width=40).pack(padx=20, pady=(0, 10))
+        
+        # Context
+        ttk.Label(dialog, text="Context Sentence (Optional):").pack(anchor="w", padx=20)
+        context_text = scrolledtext.ScrolledText(dialog, height=3, width=40, font=("Arial", 10))
+        context_text.pack(padx=20, pady=(0, 20))
+        
+        def save():
+            word = word_var.get().strip()
+            definition = def_var.get().strip()
+            context = context_text.get(1.0, tk.END).strip()
+            
+            if not word:
+                messagebox.showwarning("Required", "Please enter a word or phrase.")
+                return
+                
+            success, message = self.study_manager.add_manual_word(word, context, definition)
+            if success:
+                messagebox.showinfo("Success", "Word added successfully!")
+                dialog.destroy()
+                self.show_words_view() # Refresh view
+            else:
+                messagebox.showerror("Error", message)
+        
+        ttk.Button(dialog, text="Save Word", command=save, style="Large.TButton").pack(pady=10)
+
+    def _add_manual_sentence_dialog(self):
+        """Show dialog to manually add a sentence."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add New Sentence")
+        dialog.geometry("500x400")
+        
+        ttk.Label(dialog, text="Add New Sentence", font=("Arial", 12, "bold")).pack(pady=10)
+        
+        # Sentence
+        ttk.Label(dialog, text="Sentence (Target Language):").pack(anchor="w", padx=20)
+        sent_text = scrolledtext.ScrolledText(dialog, height=5, width=50, font=("Arial", 10))
+        sent_text.pack(padx=20, pady=(0, 15))
+        
+        # Notes
+        ttk.Label(dialog, text="Notes (Optional):").pack(anchor="w", padx=20)
+        notes_text = scrolledtext.ScrolledText(dialog, height=3, width=50, font=("Arial", 10))
+        notes_text.pack(padx=20, pady=(0, 20))
+        
+        def save():
+            sentence = sent_text.get(1.0, tk.END).strip()
+            notes = notes_text.get(1.0, tk.END).strip()
+            
+            if not sentence:
+                messagebox.showwarning("Required", "Please enter a sentence.")
+                return
+                
+            success, message = self.study_manager.add_manual_sentence(sentence, notes)
+            if success:
+                messagebox.showinfo("Success", "Sentence added successfully!")
+                dialog.destroy()
+                self.show_sentences_view() # Refresh view
+            else:
+                messagebox.showerror("Error", message)
+        
+        ttk.Button(dialog, text="Save Sentence", command=save, style="Large.TButton").pack(pady=10)
+
     # ========== UTILITY METHODS ==========
 
     
