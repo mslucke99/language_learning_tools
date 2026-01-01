@@ -19,7 +19,14 @@ Here are the ones I am currently strongly considering:
 14. Images, Audio, and other media support for flashcards
 15. UI localization if other people end up using it and it might be useful to publish
 16. UI options such as dark mode
-17. 
+17. Chat that allows the user to interact with the LLMs in the language they are language_learning_tools
+17a. The main window of this chat will allow the user to type in the language they are learning and the LLM will respond in that language
+17b. The chat function will also have the LLM to generate other things such as explanations of mistakes the user made in their writing.
+17c. The LLM can also generate flashcards based on hard words that are present in what it says in the chat.
+17d. The LLM can also add grammar patterns and study words/sentences to the database based on what it says in the chat.
+17e. The chats with the LLM should be saved so that they can be reviewed later or expanded on later.
+17f. The chat function should allow the user to select which LLM to use.
+
 
 There are some longer-term ideas that I might look into. 
 This is a list intended to just be a place to keep track of them and not necessarily ones that I would work on in the forseeable future.

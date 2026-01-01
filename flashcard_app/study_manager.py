@@ -11,6 +11,9 @@ Features:
 """
 
 import json
+import threading
+import queue
+import time
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 from database import FlashcardDatabase
@@ -44,6 +47,126 @@ class StudyManager:
         # Ensure ollama client uses the configured model
         if self.ollama_client and self.ollama_model:
             self.ollama_client.set_model(self.ollama_model)
+            
+        # Background Task Queue Setup
+        self.task_queue = queue.Queue()
+        self.processing_results = {} # task_id -> {status, result}
+        self.stop_worker = False
+        
+        # Start worker thread
+        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self.worker_thread.start()
+        
+    def queue_generation_task(self, task_type: str, item_id: int, **kwargs) -> str:
+        """
+        Queue a generation task.
+        
+        Args:
+            task_type: 'definition', 'sentence_explanation', etc.
+            item_id: ID of the word or sentence
+            kwargs: Additional arguments for generation
+            
+        Returns:
+            task_id: Unique ID for tracking the task
+        """
+        task_id = f"{task_type}_{item_id}_{int(time.time()*1000)}"
+        self.processing_results[task_id] = {'status': 'queued'}
+        
+        task = {
+            'id': task_id,
+            'type': task_type,
+            'item_id': item_id,
+            'kwargs': kwargs
+        }
+        self.task_queue.put(task)
+        return task_id
+        
+    def get_task_status(self, task_id: str) -> dict:
+        """Get status of a specific task."""
+        return self.processing_results.get(task_id, {'status': 'unknown'})
+        
+    def get_queue_status(self) -> dict:
+        """Get overall queue status."""
+        return {
+            'queued': self.task_queue.qsize(),
+            'results': len(self.processing_results)
+        }
+        
+    def _worker_loop(self):
+        """Background worker to process tasks."""
+        while not self.stop_worker:
+            try:
+                # increasing timeout allows checking for stop_worker periodically
+                task = self.task_queue.get(timeout=1) 
+            except queue.Empty:
+                continue
+                
+            task_id = task['id']
+            self.processing_results[task_id]['status'] = 'processing'
+            
+            try:
+                task_type = task['type']
+                item_id = task['item_id']
+                kwargs = task['kwargs']
+                
+                success = False
+                result = None
+                
+                # Process based on type
+                if task_type == 'definition':
+                    success, result = self.generate_word_content(item_id, **kwargs)
+                elif task_type == 'explanation':
+                    success, result = self.generate_word_content(item_id, content_type='explanation', **kwargs)
+                elif task_type == 'examples':
+                    success, result = self.generate_word_content(item_id, content_type='examples', **kwargs)
+                elif task_type == 'sentence_explanation':
+                    success, result = self.generate_sentence_explanation(item_id, **kwargs)
+                elif task_type == 'grammar_explanation':
+                    success, result = self.generate_grammar_entry_content(item_id)
+                else:
+                    success, result = False, "Unknown task type"
+                
+                self.processing_results[task_id] = {
+                    'status': 'completed' if success else 'failed',
+                    'result': result,
+                    'item_id': item_id,
+                    'type': task_type
+                }
+                
+            except Exception as e:
+                print(f"Task failed: {e}")
+                self.processing_results[task_id] = {
+                    'status': 'failed',
+                    'error': str(e)
+                }
+            finally:
+                self.task_queue.task_done()
+                
+    def batch_generate_sentences(self) -> int:
+        """
+        Queue generation for all sentences missing explanations.
+        Returns number of tasks queued.
+        """
+        sentences = self.get_imported_sentences()
+        count = 0
+        for sent in sentences:
+            if not sent['has_explanation']:
+                self.queue_generation_task('sentence_explanation', sent['id'])
+                count += 1
+        return count
+
+    def batch_generate_words(self) -> int:
+        """
+        Queue generation for all words missing definitions.
+        Returns number of tasks queued.
+        """
+        words = self.get_imported_words()
+        count = 0
+        for word in words:
+            if not word['has_definition']:
+                self.queue_generation_task('definition', word['id'])
+                count += 1
+        return count
     
     # ========== SETTINGS MANAGEMENT ==========
     
@@ -727,7 +850,7 @@ Please provide a clear, helpful answer in {target_lang}. Reference the original 
         Generate a grammar explanation using Ollama.
         
         Args:
-            topic: The grammar topic to explain (e.g., "-고 싶다 meaning")
+            topic: The grammar topic to explain
             
         Returns:
             Tuple of (success: bool, content: str)
@@ -768,7 +891,36 @@ Any important exceptions or nuances.
                 return False, "Failed to generate explanation"
         except Exception as e:
             return False, f"Error: {str(e)}"
-    
+
+    def generate_grammar_entry_content(self, entry_id: int) -> Tuple[bool, str]:
+        """
+        Generate content for a grammar entry and save it to the database.
+        
+        Args:
+            entry_id: ID of the grammar entry
+            
+        Returns:
+            Tuple of (success: bool, content: str)
+        """
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT title, tags FROM grammar_book_entries WHERE id = ?", (entry_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            return False, "Entry not found"
+            
+        title, tags = result
+        
+        # Generate content
+        success, content = self.generate_grammar_explanation(title)
+        
+        if success:
+            # Update the entry
+            self.update_grammar_entry(entry_id, title, content, tags or "")
+            return True, content
+            
+        return False, content
+
     def add_grammar_entry(self, title: str, content: str, tags: str = "") -> int:
         """Add a grammar book entry."""
         return self.db.add_grammar_entry(title, content, self.study_language, tags)

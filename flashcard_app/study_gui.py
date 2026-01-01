@@ -31,6 +31,67 @@ class StudyGUI:
         
         self.current_word_id = None
         self.current_sentence_id = None
+        
+        # Background Task Tracking
+        self.active_tasks = {} # task_id -> {type, item_id}
+        self.current_status_label = None # Widget to update with status
+        self._check_queue_status()
+        
+    def _check_queue_status(self):
+        """Poll the task queue status and update UI."""
+        status = self.study_manager.get_queue_status()
+        queued = status['queued']
+        
+        # Update status label if it exists
+        if self.current_status_label:
+            if queued > 0:
+                self.current_status_label.config(text=f"⏳ Processing: {queued} items queued...")
+            else:
+                self.current_status_label.config(text="")
+        
+        # Check for completed tasks that affect current view
+        completed_tasks = []
+        for task_id, info in self.active_tasks.items():
+            task_status = self.study_manager.get_task_status(task_id)
+            if task_status['status'] in ['completed', 'failed']:
+                completed_tasks.append(task_id)
+                self._handle_completed_task(task_id, task_status)
+        
+        # Remove completed
+        for task_id in completed_tasks:
+            del self.active_tasks[task_id]
+            
+        # Schedule next check
+        self.root.after(1000, self._check_queue_status)
+        
+    def _handle_completed_task(self, task_id, status):
+        """Handle a completed task."""
+        task_type = status.get('type')
+        item_id = status.get('item_id')
+        result = status.get('result')
+        
+        if status['status'] == 'failed':
+            messagebox.showerror("Task Failed", f"Task {task_id} failed: {status.get('error')}")
+            return
+
+        # Refresh UI if we are looking at this item
+        if task_type in ['definition', 'explanation', 'examples'] and self.current_word_id == item_id:
+            # We are likely in words view
+            if hasattr(self, 'words_listbox'): # Check if view is active
+                self._on_word_selected(None) # Reload content
+                messagebox.showinfo("Complete", "Word generation complete!")
+                
+        elif task_type == 'sentence_explanation' and self.current_sentence_id == item_id:
+            # We are likely in sentence view
+            if hasattr(self, 'sentences_listbox'):
+                self._on_sentence_selected(None) # Reload content
+                messagebox.showinfo("Complete", "Sentence explanation ready!")
+                
+        elif task_type == 'grammar_explanation' and self.current_grammar_id == item_id:
+            # We are in grammar view
+            if hasattr(self, 'grammar_listbox'):
+                self._on_grammar_entry_selected(None) # Reload content
+                messagebox.showinfo("Complete", "Grammar explanation updated!")
     
     def _setup_standard_header(self, parent, title, back_cmd=None, action_text=None, action_cmd=None):
         """Create a standard header with Back button, Title, and optional Action button."""
@@ -127,6 +188,10 @@ Study Languages:
         # Back button
         back_btn = ttk.Button(frame, text="← Back to Main Menu", command=self.on_close)
         back_btn.pack(pady=10)
+        
+        # Status Label (Global)
+        self.current_status_label = ttk.Label(frame, text="", font=("Arial", 10, "italic"), foreground="blue")
+        self.current_status_label.pack(pady=5)
 
     
     # ========== WORDS VIEW ==========
@@ -177,14 +242,26 @@ Study Languages:
                 self.words_listbox.insert(tk.END, display)
         else:
             self.words_listbox.insert(tk.END, "(No words found)")
+            
+        # Batch Button
+        if self.ollama_available:
+            ttk.Button(left_pane, text="⚡ Batch Define (Missing)", command=self._start_batch_words).pack(fill="x", pady=5)
         
         # RIGHT PANE: Detail & Editor
         right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
         paned_window.add(right_pane, weight=3)
         
-        # Selected Word Display (Always Visible)
-        self.word_label = ttk.Label(right_pane, text="(Select a word)", style="Subtitle.TLabel")
-        self.word_label.pack(anchor="w", pady=(0, 10))
+        # Header Row (Label + Status)
+        header_row = ttk.Frame(right_pane)
+        header_row.pack(fill="x", pady=(0, 10))
+        
+        # Selected Word Display
+        self.word_label = ttk.Label(header_row, text="(Select a word)", style="Subtitle.TLabel")
+        self.word_label.pack(side="left")
+        
+        # Status Label
+        self.current_status_label = ttk.Label(header_row, text="", font=("Arial", 9, "italic"), foreground="blue")
+        self.current_status_label.pack(side="right")
         
         # TABS for Details
         self.notebook = ttk.Notebook(right_pane)
@@ -302,7 +379,7 @@ Study Languages:
     
     def _generate_word_content(self, content_type: str):
         """
-        Generate word content (definition, explanation, or examples) using Ollama.
+        Generate word content (definition, explanation, or examples) using Ollama asynchronously.
         
         Args:
             content_type: 'definition', 'explanation', or 'examples'
@@ -311,31 +388,25 @@ Study Languages:
             messagebox.showwarning("Warning", "Please select a word first")
             return
         
-        # Show loading
-        original_text = self.word_definition_text.get(1.0, tk.END)
+        # Show loading/queued state
         self.word_definition_text.delete(1.0, tk.END)
+        self.word_definition_text.insert(tk.END, f"⏳ Task Queued: Generating {content_type}...")
         
-        type_display = {
-            'definition': 'definition',
-            'explanation': 'explanation',
-            'examples': 'examples'
-        }
-        
-        self.word_definition_text.insert(tk.END, f"🔄 Generating {type_display.get(content_type, content_type)}...")
-        self.root.update()
-        
-        success, result = self.study_manager.generate_word_content(
+        # Queue the task
+        task_id = self.study_manager.queue_generation_task(
+            content_type,
             self.current_word_id,
-            content_type=content_type,
             language='native'
         )
         
-        self.word_definition_text.delete(1.0, tk.END)
-        if success:
-            self.word_definition_text.insert(tk.END, result)
-        else:
-            self.word_definition_text.insert(tk.END, original_text)
-            messagebox.showerror("Error", result)
+        # Track active task for this view
+        self.active_tasks[task_id] = {
+            'type': content_type,
+            'item_id': self.current_word_id
+        }
+        
+        # Poke the status checker
+        self._check_queue_status()
     
     # ========== SENTENCES VIEW ==========
     
@@ -385,10 +456,20 @@ Study Languages:
                 self.sentences_listbox.insert(tk.END, display)
         else:
             self.sentences_listbox.insert(tk.END, "(No sentences found)")
-        
+            
+        # Batch Button
+        if self.ollama_available:
+            ttk.Button(left_pane, text="⚡ Batch Explain (Missing)", command=self._start_batch_sentences).pack(fill="x", pady=5)
+            
         # RIGHT PANE: Details & Editor
         right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
         paned_window.add(right_pane, weight=3)
+        
+        # Status Label Row
+        status_frame = ttk.Frame(right_pane)
+        status_frame.pack(fill="x", pady=(0, 5))
+        self.current_status_label = ttk.Label(status_frame, text="", font=("Arial", 9, "italic"), foreground="blue")
+        self.current_status_label.pack(side="right")
         
         # Target Sentence Display (Always Visible)
         target_frame = ttk.LabelFrame(right_pane, text="Target Sentence", padding="10")
@@ -608,7 +689,7 @@ Study Languages:
             messagebox.showerror("Error", result)
     
     def _generate_sentence_explanation_multi(self):
-        """Generate sentence explanation for multiple selected focus areas using Ollama."""
+        """Generate sentence explanation for multiple selected focus areas using Ollama asynchronously."""
         if not self.current_sentence_id:
             messagebox.showwarning("Warning", "Please select a sentence first")
             return
@@ -620,24 +701,26 @@ Study Languages:
             messagebox.showwarning("Warning", "Please select at least one focus area")
             return
         
-        # Show loading
-        original_text = self.sentence_explanation_text.get(1.0, tk.END)
+        # Show loading/queued
         self.sentence_explanation_text.delete(1.0, tk.END)
-        self.sentence_explanation_text.insert(tk.END, f"🔄 Generating explanations for {', '.join(selected_focus_areas)}...")
-        self.root.update()
+        self.sentence_explanation_text.insert(tk.END, f"⏳ Task Queued: Generating explanations for {', '.join(selected_focus_areas)}...")
         
-        success, result = self.study_manager.generate_sentence_explanation(
+        # Queue task
+        task_id = self.study_manager.queue_generation_task(
+            'sentence_explanation',
             self.current_sentence_id,
             language='native',
             focus_areas=selected_focus_areas
         )
         
-        self.sentence_explanation_text.delete(1.0, tk.END)
-        if success:
-            self.sentence_explanation_text.insert(tk.END, result)
-        else:
-            self.sentence_explanation_text.insert(tk.END, original_text)
-            messagebox.showerror("Error", result)
+        # Track active task
+        self.active_tasks[task_id] = {
+            'type': 'sentence_explanation',
+            'item_id': self.current_sentence_id
+        }
+        
+        # Poke status checker
+        self._check_queue_status()
     
     # ========== FOLLOW-UP QUESTIONS ==========
     
@@ -774,6 +857,12 @@ Study Languages:
         right_panel = ttk.LabelFrame(paned_window, text="Entry Editor", padding="15")
         paned_window.add(right_panel, weight=3)
         
+        # Status Label
+        status_frame = ttk.Frame(right_panel)
+        status_frame.pack(fill="x", pady=(0, 10))
+        self.current_status_label = ttk.Label(status_frame, text="", font=("Arial", 9, "italic"), foreground="blue")
+        self.current_status_label.pack(side="right")
+        
         # Title Input
         title_frame = ttk.Frame(right_panel)
         title_frame.pack(fill="x", pady=(0, 10))
@@ -855,18 +944,20 @@ Study Languages:
             messagebox.showwarning("Warning", "Title is required")
             return
             
-        if not content:
-            messagebox.showwarning("Warning", "Content is required")
-            return
-            
+        # Allow saving without content (e.g., for AI generation prep)
+        
         if self.current_grammar_id:
             self.study_manager.update_grammar_entry(self.current_grammar_id, title, content, tags)
         else:
-            self.study_manager.add_grammar_entry(title, content, tags)
+            self.current_grammar_id = self.study_manager.add_grammar_entry(title, content, tags)
             
         self._load_grammar_entries()
-        self._new_grammar_entry()
-        messagebox.showinfo("Success", "Entry saved!")
+        
+        # We don't call _new_grammar_entry() here because we want to keep editing the entry
+        # or proceed to AI generation if that was the intent.
+        
+        msg = "Entry saved!" if content else "Entry created (Title only). You can now generate content!"
+        messagebox.showinfo("Success", msg)
         
     def _delete_grammar_entry(self):
         """Delete the current grammar entry."""
@@ -879,23 +970,39 @@ Study Languages:
             self._new_grammar_entry()
             
     def _generate_grammar_explanation(self):
-        """Generate grammar explanation using AI."""
-        topic = self.grammar_title_var.get().strip()
-        if not topic:
-            messagebox.showwarning("Warning", "Please enter a title (topic) first")
-            return
+        """Generate grammar explanation using AI asynchronously."""
+        if not self.current_grammar_id:
+            # Auto-save if it's a new entry (requires title)
+            topic = self.grammar_title_var.get().strip()
+            if not topic:
+                messagebox.showwarning("Warning", "Please enter a title (topic) first")
+                return
             
+            # Save to get an ID
+            self._save_grammar_entry()
+            
+            # Check if save was successful (ID should be set now)
+            if not self.current_grammar_id:
+                return
+            
+        # Show loading/queued
         self.grammar_content_text.delete(1.0, tk.END)
-        self.grammar_content_text.insert(tk.END, "🔄 Generating explanation... Please wait.")
-        self.root.update()
+        self.grammar_content_text.insert(tk.END, "⏳ Task Queued: Generating grammar explanation...")
         
-        success, content = self.study_manager.generate_grammar_explanation(topic)
+        # Queue task
+        task_id = self.study_manager.queue_generation_task(
+            'grammar_explanation',
+            self.current_grammar_id
+        )
         
-        self.grammar_content_text.delete(1.0, tk.END)
-        if success:
-            self.grammar_content_text.insert(tk.END, content)
-        else:
-            self.grammar_content_text.insert(tk.END, f"Error: {content}")
+        # Track active task
+        self.active_tasks[task_id] = {
+            'type': 'grammar_explanation',
+            'item_id': self.current_grammar_id
+        }
+        
+        # Poke status checker
+        self._check_queue_status()
             
             
     
@@ -982,6 +1089,30 @@ Study Languages:
     # ========== UTILITY METHODS ==========
 
     
+    def _start_batch_words(self):
+        """Start batch generation for missing word definitions."""
+        if not messagebox.askyesno("Batch Process", "Generate definitions for all words that don't have one?"):
+            return
+            
+        count = self.study_manager.batch_generate_words()
+        if count > 0:
+            messagebox.showinfo("Batch Started", f"Queued {count} words for generation.\nYou can continue using the app while they process.")
+            self._check_queue_status()
+        else:
+            messagebox.showinfo("Batch Process", "No words found missing definitions.")
+
+    def _start_batch_sentences(self):
+        """Start batch generation for missing sentence explanations."""
+        if not messagebox.askyesno("Batch Process", "Generate explanations for all sentences that don't have one?"):
+            return
+            
+        count = self.study_manager.batch_generate_sentences()
+        if count > 0:
+            messagebox.showinfo("Batch Started", f"Queued {count} sentences for explanation.\nYou can continue using the app while they process.")
+            self._check_queue_status()
+        else:
+            messagebox.showinfo("Batch Process", "No sentences found missing explanations.")
+
     def clear_window(self):
         """Clear all widgets from the window."""
         for widget in self.root.winfo_children():
