@@ -252,11 +252,13 @@ class FlashcardDatabase:
         return flashcards
 
     def update_flashcard(self, flashcard):
-        # Update a flashcard's stats
+        # Update a flashcard's content and stats
         cursor = self.conn.cursor()
         cursor.execute(
-            "UPDATE flashcards SET last_reviewed = ?, easiness = ?, interval = ?, repetitions = ?, total_reviews = ?, correct_reviews = ? WHERE id = ?",
+            "UPDATE flashcards SET question = ?, answer = ?, last_reviewed = ?, easiness = ?, interval = ?, repetitions = ?, total_reviews = ?, correct_reviews = ? WHERE id = ?",
             (
+                flashcard.question,
+                flashcard.answer,
                 flashcard.last_reviewed.isoformat() if flashcard.last_reviewed else None,
                 flashcard.easiness,
                 flashcard.interval,
@@ -275,6 +277,26 @@ class FlashcardDatabase:
         cursor.execute("DELETE FROM flashcards WHERE id = ?", (flashcard_id,))
         self.conn.commit()
         return cursor.rowcount > 0
+
+    def find_flashcard_by_question(self, question: str) -> list[dict]:
+        """Find flashcards by question text across all decks (case-insensitive)."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT f.id, f.question, f.answer, d.name as deck_name
+            FROM flashcards f
+            JOIN decks d ON f.deck_id = d.id
+            WHERE LOWER(f.question) = LOWER(?)
+        """, (question.strip(),))
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                "id": row[0],
+                "question": row[1],
+                "answer": row[2],
+                "deck_name": row[3]
+            })
+        return results
 
     def get_deck_statistics(self, deck_id: int) -> dict:
         """Get statistics for a deck."""

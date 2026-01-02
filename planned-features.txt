@@ -1,14 +1,12 @@
 This is a list of the features that I plan on adding to this app. 
 Here are the ones I am currently strongly considering:
-1. I plan on allowing word definitions to be exported to flashcard decks
+1. I plan on allowing word definitions to be exported to flashcard decks (done)
 2. I plan on allowing promtps, models, and timeouts to be configurable (Done)
 3. Adding follow ups to the grammar explanations to allow the user to explore specific points (Done)
-4. The ability to edit flashcards after they are created without recreating them
-5. Batch processing for word explanations
-6. Sort and filter options for words and phrases
-7. I might look into tool use to allow agents to export words in the sentences directly to flash cards
-7a. I might need some universal vocabulary tracker for that to work well.
-7b. If I do that, it might also be a good idea to make sure the model doesn't add a bunch of excessively easy words
+4. The ability to edit flashcards after they are created without recreating them (done)
+5. Batch processing for word explanations (done)
+6. Sort and filter options for words and phrases (done)
+7. I might need some universal vocabulary tracker that tracks the words (question) in the flashcards so the user can know if they want to add the words suggested by the model/words they are inputting or know if they already have them in their flashcards 
 8. I might try to add quiz features
 9. example sentence generation based on grammar patterns (after grammar book is added)
 10. Perhaps I can even give the LLMs tool use and allow them to look up what one should know for specific exams for various languages could be
@@ -26,6 +24,7 @@ Here are the ones I am currently strongly considering:
 17d. The LLM can also add grammar patterns and study words/sentences to the database based on what it says in the chat.
 17e. The chats with the LLM should be saved so that they can be reviewed later or expanded on later.
 17f. The chat function should allow the user to select which LLM to use.
+
 
 
 There are some longer-term ideas that I might look into. 

@@ -35,12 +35,18 @@ WORD_PROMPTS = {
         'native_template': (
             'Provide 3 diverse example sentences for "{word}" in {native_language}. '
             '1. A simple statement. 2. A common question. 3. A sentence showing a unique grammatical property. '
-            'Highlight the word in **bold**.'
+            'Highlight the word in **bold**.\n\n'
+            '**Suggestions**: If any other words in these examples are likely to be difficult for a learner, '
+            'append a flashcard suggestion at the very end of your response for 1-2 of them in this format: '
+            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>'
         ),
         'study_template': (
             'Provide 3 simple sentences in {study_language} using "{word}". '
             'Include {native_language} translations. Use standard polite forms for Asian languages '
-            'unless specified otherwise. Highlight the word in **bold**.'
+            'unless specified otherwise. Highlight the word in **bold**.\n\n'
+            '**Suggestions**: If any other words in these examples are difficult, '
+            'append a flashcard suggestion at the very end in this format: '
+            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>'
         ),
     }
 }
@@ -54,7 +60,10 @@ SENTENCE_PROMPTS = {
             'In {language}, explain:\n'
             '1. **Morphology**: Break down complex words into roots, suffixes, or particles (especially important for Korean or Biblical languages).\n'
             '2. **Syntax**: Explain the word order or sentence structure.\n'
-            '3. **Key Rules**: Any specific grammar rules (tense, case, aspect) used here.'
+            '3. **Key Rules**: Any specific grammar rules (tense, case, aspect) used here.\n\n'
+            '**Suggestions**: If there is a distinct grammar pattern used (e.g., a specific conjugation rule or sentence structure pattern), '
+            'append a grammar suggestion at the very end in this format: '
+            '<grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>'
         ),
     },
     'vocabulary': {
@@ -90,7 +99,10 @@ SENTENCE_PROMPTS = {
             '1. **Translation**: A natural-sounding translation.\n'
             '2. **Literal Breakdown**: A word-for-word mapping if the grammar is very different.\n'
             '3. **Grammar & Vocab**: The most critical points to learn from this sentence.\n'
-            '4. **Usage Tip**: A practical tip on how to use these patterns elsewhere.'
+            '4. **Usage Tip**: A practical tip on how to use these patterns elsewhere.\n\n'
+            '**Suggestions**: \n'
+            '- If there is a distinct grammar pattern, append: <grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>\n'
+            '- If there is a difficult word worth studying separately, append: <flashcard word="TERM">BRIEF_DEFINITION</flashcard>'
         ),
     }
 }

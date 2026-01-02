@@ -231,9 +231,27 @@ Total Reviews: {deck_stats['total_reviews']}  |  Accuracy: {deck_stats['overall_
         question_text = tk.Text(dialog, height=3, width=40)
         question_text.pack(pady=5)
         
+        warning_label = ttk.Label(dialog, text="", foreground="orange", font=("Arial", 9, "italic"))
+        warning_label.pack()
+        
         ttk.Label(dialog, text="Answer:", font=("Arial", 10)).pack(pady=5)
         answer_text = tk.Text(dialog, height=3, width=40)
         answer_text.pack(pady=5)
+        
+        def check_duplicate(event=None):
+            question = question_text.get("1.0", "end").strip()
+            if not question:
+                warning_label.config(text="")
+                return
+            
+            matches = self.db.find_flashcard_by_question(question)
+            if matches:
+                matching_decks = list(set([m['deck_name'] for m in matches]))
+                warning_label.config(text=f"⚠️ Already in deck(s): {', '.join(matching_decks)}")
+            else:
+                warning_label.config(text="")
+        
+        question_text.bind("<KeyRelease>", check_duplicate)
         
         def save_card():
             question = question_text.get("1.0", "end").strip()
@@ -242,6 +260,14 @@ Total Reviews: {deck_stats['total_reviews']}  |  Accuracy: {deck_stats['overall_
             if not question or not answer:
                 messagebox.showerror("Error", "Please enter both question and answer")
                 return
+            
+            # Check for duplicates again on save
+            matches = self.db.find_flashcard_by_question(question)
+            if matches:
+                matching_decks = list(set([m['deck_name'] for m in matches]))
+                msg = f"This word already exists in deck(s): {', '.join(matching_decks)}.\n\nAdd it anyway?"
+                if not messagebox.askyesno("Duplicate Word", msg):
+                    return
             
             self.db.add_flashcard(self.current_deck_id, question, answer)
             messagebox.showinfo("Success", "Card added!")
@@ -260,33 +286,152 @@ Total Reviews: {deck_stats['total_reviews']}  |  Accuracy: {deck_stats['overall_
         title = ttk.Label(frame, text="All Cards in Deck", font=("Arial", 16, "bold"))
         title.pack(pady=10)
         
-        flashcards = self.db.get_all_flashcards(self.current_deck_id)
+        self.current_all_flashcards = self.db.get_all_flashcards(self.current_deck_id)
         
-        if not flashcards:
+        if not self.current_all_flashcards:
             ttk.Label(frame, text="No cards in this deck", font=("Arial", 12)).pack(pady=20)
         else:
+            # Controls Frame (Search & Sort)
+            controls_frame = ttk.Frame(frame)
+            controls_frame.pack(fill="x", pady=(0, 10))
+            
+            ttk.Label(controls_frame, text="Search:").pack(side="left", padx=(0, 5))
+            self.card_search_var = tk.StringVar()
+            search_entry = ttk.Entry(controls_frame, textvariable=self.card_search_var, width=30)
+            search_entry.pack(side="left", padx=(0, 20))
+            search_entry.bind("<KeyRelease>", lambda e: self._filter_and_sort_cards())
+            
+            ttk.Label(controls_frame, text="Sort By:").pack(side="left", padx=(0, 5))
+            self.card_sort_var = tk.StringVar(value="Newest First")
+            sort_options = ["Newest First", "Oldest First", "A-Z (Question)", "Accuracy (Low)", "Accuracy (High)"]
+            sort_dropdown = ttk.Combobox(controls_frame, textvariable=self.card_sort_var, values=sort_options, state="readonly", width=15)
+            sort_dropdown.pack(side="left")
+            sort_dropdown.bind("<<ComboboxSelected>>", lambda e: self._filter_and_sort_cards())
             # Treeview for cards
-            tree = ttk.Treeview(frame, columns=("Accuracy", "Next Review"), height=20)
-            tree.column("#0", width=300)
-            tree.column("Accuracy", width=150)
-            tree.column("Next Review", width=200)
-            tree.heading("#0", text="Question")
-            tree.heading("Accuracy", text="Accuracy")
-            tree.heading("Next Review", text="Next Review Date")
-            tree.pack(fill="both", expand=True, pady=10)
+            self.cards_tree = ttk.Treeview(frame, columns=("Accuracy", "Next Review"), height=15)
+            self.cards_tree.column("#0", width=300)
+            self.cards_tree.column("Accuracy", width=150)
+            self.cards_tree.column("Next Review", width=200)
+            self.cards_tree.heading("#0", text="Question")
+            self.cards_tree.heading("Accuracy", text="Accuracy")
+            self.cards_tree.heading("Next Review", text="Next Review Date")
+            self.cards_tree.pack(fill="both", expand=True, pady=10)
             
             # Scrollbar
-            scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+            scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.cards_tree.yview)
             scrollbar.pack(side="right", fill="y")
-            tree.configure(yscroll=scrollbar.set)
+            self.cards_tree.configure(yscroll=scrollbar.set)
             
-            for fc in flashcards:
-                accuracy = f"{fc.get_accuracy():.1f}%" if fc.total_reviews > 0 else "N/A"
-                next_review = get_next_review_date(fc).strftime("%Y-%m-%d %H:%M") if fc.last_reviewed else "Today"
-                tree.insert("", "end", text=fc.question, values=(accuracy, next_review))
+            # Action Buttons
+            action_frame = ttk.Frame(frame)
+            action_frame.pack(fill="x", pady=10)
+            
+            ttk.Button(action_frame, text="Edit Selected", command=self.edit_selected_card).pack(side="left", padx=5)
+            ttk.Button(action_frame, text="Delete Selected", command=self.delete_selected_card_from_list).pack(side="left", padx=5)
         
         ttk.Button(frame, text="Back", command=self.show_deck_menu).pack(pady=10)
+        
+        if self.current_all_flashcards:
+            self._filter_and_sort_cards()
+
+    def _filter_and_sort_cards(self):
+        """Filter and sort flashcards in the Treeview."""
+        search_query = self.card_search_var.get().lower().strip()
+        sort_by = self.card_sort_var.get()
+        
+        # Filter
+        filtered = self.current_all_flashcards
+        if search_query:
+            filtered = [fc for fc in filtered if search_query in fc.question.lower() or search_query in fc.answer.lower()]
+            
+        # Sort
+        if sort_by == "Newest First":
+            filtered = sorted(filtered, key=lambda x: x.id, reverse=True)
+        elif sort_by == "Oldest First":
+            filtered = sorted(filtered, key=lambda x: x.id)
+        elif sort_by == "A-Z (Question)":
+            filtered = sorted(filtered, key=lambda x: x.question.lower())
+        elif sort_by == "Accuracy (Low)":
+            filtered = sorted(filtered, key=lambda x: x.get_accuracy())
+        elif sort_by == "Accuracy (High)":
+            filtered = sorted(filtered, key=lambda x: x.get_accuracy(), reverse=True)
+            
+        # Update Treeview
+        for item in self.cards_tree.get_children():
+            self.cards_tree.delete(item)
+            
+        self.filtered_cards = filtered
+        
+        for i, fc in enumerate(filtered):
+            accuracy = f"{fc.get_accuracy():.1f}%" if fc.total_reviews > 0 else "N/A"
+            next_review = get_next_review_date(fc).strftime("%Y-%m-%d %H:%M") if fc.last_reviewed else "Today"
+            self.cards_tree.insert("", "end", iid=str(i), text=fc.question, values=(accuracy, next_review))
     
+    def edit_selected_card(self):
+        """Edit the selected card from the list."""
+        selection = self.cards_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a card to edit")
+            return
+        
+        index = int(selection[0])
+        flashcard = self.filtered_cards[index]
+        
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Edit Flashcard")
+        dialog.geometry("400x350")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text="Question:", font=("Arial", 10)).pack(pady=5)
+        question_text = tk.Text(dialog, height=4, width=40)
+        question_text.pack(pady=5)
+        question_text.insert("1.0", flashcard.question)
+        
+        ttk.Label(dialog, text="Answer:", font=("Arial", 10)).pack(pady=5)
+        answer_text = tk.Text(dialog, height=4, width=40)
+        answer_text.pack(pady=5)
+        answer_text.insert("1.0", flashcard.answer)
+        
+        def save_changes():
+            new_question = question_text.get("1.0", "end").strip()
+            new_answer = answer_text.get("1.0", "end").strip()
+            
+            if not new_question or not new_answer:
+                messagebox.showerror("Error", "Both question and answer are required")
+                return
+            
+            flashcard.question = new_question
+            flashcard.answer = new_answer
+            self.db.update_flashcard(flashcard)
+            
+            messagebox.showinfo("Success", "Card updated!")
+            dialog.destroy()
+            
+            # Refresh data and view
+            self.current_all_flashcards = self.db.get_all_flashcards(self.current_deck_id)
+            self._filter_and_sort_cards()
+            
+        ttk.Button(dialog, text="Save Changes", command=save_changes).pack(pady=10)
+
+    def delete_selected_card_from_list(self):
+        """Delete the selected card from the list."""
+        selection = self.cards_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a card to delete")
+            return
+        
+        index = int(selection[0])
+        flashcard = self.filtered_cards[index]
+        
+        if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this card?"):
+            self.db.delete_flashcard(flashcard.id)
+            messagebox.showinfo("Success", "Card deleted!")
+            
+            # Refresh data and view
+            self.current_all_flashcards = self.db.get_all_flashcards(self.current_deck_id)
+            self._filter_and_sort_cards()
+
     def start_review(self):
         """Start reviewing cards."""
         due_cards = self.db.get_due_flashcards(self.current_deck_id)

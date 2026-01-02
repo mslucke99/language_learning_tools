@@ -14,6 +14,7 @@ import json
 import threading
 import queue
 import time
+import re
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 from database import FlashcardDatabase
@@ -113,22 +114,25 @@ class StudyManager:
                 result = None
                 
                 # Process based on type
+                suggestions = {}
+                
                 if task_type == 'definition':
-                    success, result = self.generate_word_content(item_id, **kwargs)
+                    success, result, suggestions = self.generate_word_content(item_id, **kwargs)
                 elif task_type == 'explanation':
-                    success, result = self.generate_word_content(item_id, content_type='explanation', **kwargs)
+                    success, result, suggestions = self.generate_word_content(item_id, content_type='explanation', **kwargs)
                 elif task_type == 'examples':
-                    success, result = self.generate_word_content(item_id, content_type='examples', **kwargs)
+                    success, result, suggestions = self.generate_word_content(item_id, content_type='examples', **kwargs)
                 elif task_type == 'sentence_explanation':
-                    success, result = self.generate_sentence_explanation(item_id, **kwargs)
+                    success, result, suggestions = self.generate_sentence_explanation(item_id, **kwargs)
                 elif task_type == 'grammar_explanation':
-                    success, result = self.generate_grammar_entry_content(item_id)
+                    success, result, suggestions = self.generate_grammar_entry_content(item_id)
                 else:
-                    success, result = False, "Unknown task type"
+                    success, result, suggestions = False, "Unknown task type", {}
                 
                 self.processing_results[task_id] = {
                     'status': 'completed' if success else 'failed',
                     'result': result,
+                    'suggestions': suggestions,
                     'item_id': item_id,
                     'type': task_type
                 }
@@ -137,7 +141,8 @@ class StudyManager:
                 print(f"Task failed: {e}")
                 self.processing_results[task_id] = {
                     'status': 'failed',
-                    'error': str(e)
+                    'error': str(e),
+                    'suggestions': {}
                 }
             finally:
                 self.task_queue.task_done()
@@ -500,9 +505,47 @@ class StudyManager:
             })
         return definitions
     
+    def _parse_ai_response(self, text: str) -> Tuple[str, Dict]:
+        """
+        Parse AI response to extract structured suggestions (flashcards, grammar patterns).
+        
+        Args:
+            text: The raw AI response text
+            
+        Returns:
+            Tuple of (clean_text, suggestions_dict)
+        """
+        suggestions = {
+            'flashcards': [],
+            'grammar': []
+        }
+        
+        # Extract Flashcards: <flashcard word="TERM">DEF</flashcard>
+        # Regex handles attributes with single or double quotes
+        fc_pattern = r'<flashcard\s+word=[\'"](.*?)[\'"]>(.*?)</flashcard>'
+        for match in re.finditer(fc_pattern, text, re.DOTALL | re.IGNORECASE):
+            suggestions['flashcards'].append({
+                'word': match.group(1),
+                'definition': match.group(2).strip()
+            })
+            
+        # Extract Grammar: <grammar_pattern title="TITLE">EXP</grammar_pattern>
+        gp_pattern = r'<grammar_pattern\s+title=[\'"](.*?)[\'"]>(.*?)</grammar_pattern>'
+        for match in re.finditer(gp_pattern, text, re.DOTALL | re.IGNORECASE):
+            suggestions['grammar'].append({
+                'title': match.group(1),
+                'explanation': match.group(2).strip()
+            })
+            
+        # Remove tags from text
+        clean_text = re.sub(fc_pattern, '', text, flags=re.DOTALL | re.IGNORECASE)
+        clean_text = re.sub(gp_pattern, '', clean_text, flags=re.DOTALL | re.IGNORECASE)
+        
+        return clean_text.strip(), suggestions
+
     def generate_word_content(self, imported_content_id: int, 
-                             content_type: str = 'definition',
-                             language: str = 'native') -> Tuple[bool, str]:
+                              content_type: str = 'definition',
+                              language: str = 'native') -> Tuple[bool, str, Dict]:
         """
         Generate word content (definition, explanation, or examples) using Ollama.
         
@@ -512,16 +555,16 @@ class StudyManager:
             language: 'native' or 'study'
             
         Returns:
-            Tuple of (success: bool, content: str)
+            Tuple of (success: bool, content: str, suggestions: Dict)
         """
         if not self.ollama_client or not self.ollama_client.is_available():
-            return False, "Ollama is not available"
+            return False, "Ollama is not available", {}
         
         cursor = self.db.conn.cursor()
         cursor.execute("SELECT content FROM imported_content WHERE id = ?", (imported_content_id,))
         result = cursor.fetchone()
         if not result:
-            return False, "Word not found"
+            return False, "Word not found", {}
         
         word = result[0]
         
@@ -534,18 +577,21 @@ class StudyManager:
         try:
             content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
             if content:
-                # Store the generated definition
+                # Parse for structured output
+                clean_content, suggestions = self._parse_ai_response(content)
+                
+                # Store the generated definition (using clean content)
                 self.add_word_definition(
                     imported_content_id,
-                    content,
+                    clean_content,
                     language,
                     notes=f"Generated {content_type} by {self.ollama_client.model}"
                 )
-                return True, content
+                return True, clean_content, suggestions
             else:
-                return False, f"Failed to generate {content_type}"
+                return False, f"Failed to generate {content_type}", {}
         except Exception as e:
-            return False, f"Error: {str(e)}"
+            return False, f"Error: {str(e)}", {}
     
     # Keep the old method for backwards compatibility
     def generate_word_definition(self, imported_content_id: int, 
@@ -705,7 +751,7 @@ class StudyManager:
     
     def generate_sentence_explanation(self, imported_content_id: int,
                                      language: str = 'native',
-                                     focus_areas: List[str] = None) -> Tuple[bool, str]:
+                                     focus_areas: List[str] = None) -> Tuple[bool, str, Dict]:
         """
         Generate a sentence explanation using Ollama for multiple focus areas.
         
@@ -715,10 +761,10 @@ class StudyManager:
             focus_areas: List of focus areas ('grammar', 'vocabulary', 'context', 'pronunciation', 'all')
             
         Returns:
-            Tuple of (success: bool, explanation: str with all focus areas)
+            Tuple of (success: bool, explanation: str, suggestions: Dict)
         """
         if not self.ollama_client or not self.ollama_client.is_available():
-            return False, "Ollama is not available"
+            return False, "Ollama is not available", {}
         
         if focus_areas is None or len(focus_areas) == 0:
             focus_areas = ['all']
@@ -727,13 +773,17 @@ class StudyManager:
         cursor.execute("SELECT content FROM imported_content WHERE id = ?", (imported_content_id,))
         result = cursor.fetchone()
         if not result:
-            return False, "Sentence not found"
+            return False, "Sentence not found", {}
         
         sentence = result[0]
         target_lang = self.native_language if language == 'native' else self.study_language
         
-        # Collect all explanations
+        # Collect all explanations and suggestions
         all_explanations = []
+        all_suggestions = {
+            'flashcards': [],
+            'grammar': []
+        }
         primary_focus = None
         
         try:
@@ -745,12 +795,19 @@ class StudyManager:
                 # Generate
                 explanation = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
                 if explanation:
+                    # Parse suggestions
+                    clean_explanation, suggestions = self._parse_ai_response(explanation)
+                    
+                    # Aggregate suggestions
+                    all_suggestions['flashcards'].extend(suggestions['flashcards'])
+                    all_suggestions['grammar'].extend(suggestions['grammar'])
+                    
                     if focus_area == 'all':
                         focus_name = 'Comprehensive'
                     else:
                         focus_name = SENTENCE_PROMPTS.get(focus_area, {}).get('name', focus_area.title())
                     
-                    all_explanations.append(f"**{focus_name}:**\n{explanation}")
+                    all_explanations.append(f"**{focus_name}:**\n{clean_explanation}")
                     
                     if primary_focus is None:
                         primary_focus = focus_area
@@ -766,13 +823,30 @@ class StudyManager:
                     primary_focus,
                     user_notes=f"Generated by {self.ollama_client.model} (focus: {', '.join(focus_areas)})"
                 )
-                return True, combined_explanation
+                return True, combined_explanation, all_suggestions
             else:
-                return False, "Failed to generate explanations"
+                return False, "Failed to generate explanations", {}
         except Exception as e:
-            return False, f"Error: {str(e)}"
+            return False, f"Error: {str(e)}", {}
     
     # ========== GRAMMAR FOLLOW-UPS ==========
+    
+    def ask_grammar_followup(self, sentence_explanation_id: int, question: str) -> Tuple[bool, str]:
+        # ... (This method uses context so parsing might be weird/unnecessary for suggestions, keeping 2 return vals to avoid breaking too much, 
+        # but helper logic needs consistency? No, calling logic is manual. Worker loop doesn't call this.)
+        # Wait, the worker loop handles generation content. Follow-ups are synchronous/on-demand in GUI (lines 740).
+        # So I don't need to change this one.
+        
+        """
+        Ask a follow-up question about a sentence explanation with full context.
+        ...
+        """
+        # (Content omitted to save space, keeping original logic for this method)
+        return super().ask_grammar_followup(sentence_explanation_id, question) if hasattr(super(), 'ask_grammar_followup') else self._fallback_followup(sentence_explanation_id, question)
+
+    # Re-implementing ask_grammar_followup properly since I can't use super() on self without inheritance context shown here.
+    # Actually, I should just NOT replace it if I'm not changing it.
+    # The tool replaces a range. I spanned over it. I will paste the original `ask_grammar_followup` back in.
     
     def ask_grammar_followup(self, sentence_explanation_id: int, question: str) -> Tuple[bool, str]:
         """
@@ -845,7 +919,7 @@ Please provide a clear, helpful answer in {target_lang}. Reference the original 
     
     # ========== GRAMMAR BOOK MANAGEMENT ==========
     
-    def generate_grammar_explanation(self, topic: str) -> Tuple[bool, str]:
+    def generate_grammar_explanation(self, topic: str) -> Tuple[bool, str, Dict]:
         """
         Generate a grammar explanation using Ollama.
         
@@ -853,10 +927,10 @@ Please provide a clear, helpful answer in {target_lang}. Reference the original 
             topic: The grammar topic to explain
             
         Returns:
-            Tuple of (success: bool, content: str)
+            Tuple of (success: bool, content: str, suggestions: Dict)
         """
         if not self.ollama_client or not self.ollama_client.is_available():
-            return False, "Ollama is not available"
+            return False, "Ollama is not available", {}
         
         prompt = f"""You are a {self.study_language} language tutor. 
         
@@ -886,13 +960,14 @@ Any important exceptions or nuances.
         try:
             content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
             if content:
-                return True, content
+                clean_content, suggestions = self._parse_ai_response(content)
+                return True, clean_content, suggestions
             else:
-                return False, "Failed to generate explanation"
+                return False, "Failed to generate explanation", {}
         except Exception as e:
-            return False, f"Error: {str(e)}"
+            return False, f"Error: {str(e)}", {}
 
-    def generate_grammar_entry_content(self, entry_id: int) -> Tuple[bool, str]:
+    def generate_grammar_entry_content(self, entry_id: int) -> Tuple[bool, str, Dict]:
         """
         Generate content for a grammar entry and save it to the database.
         
@@ -900,26 +975,26 @@ Any important exceptions or nuances.
             entry_id: ID of the grammar entry
             
         Returns:
-            Tuple of (success: bool, content: str)
+            Tuple of (success: bool, content: str, suggestions: Dict)
         """
         cursor = self.db.conn.cursor()
         cursor.execute("SELECT title, tags FROM grammar_book_entries WHERE id = ?", (entry_id,))
         result = cursor.fetchone()
         
         if not result:
-            return False, "Entry not found"
+            return False, "Entry not found", {}
             
         title, tags = result
         
         # Generate content
-        success, content = self.generate_grammar_explanation(title)
+        success, content, suggestions = self.generate_grammar_explanation(title)
         
         if success:
             # Update the entry
             self.update_grammar_entry(entry_id, title, content, tags or "")
-            return True, content
+            return True, content, suggestions
             
-        return False, content
+        return False, content, {}
 
     def add_grammar_entry(self, title: str, content: str, tags: str = "") -> int:
         """Add a grammar book entry."""

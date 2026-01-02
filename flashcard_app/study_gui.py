@@ -34,6 +34,7 @@ class StudyGUI:
         
         # Background Task Tracking
         self.active_tasks = {} # task_id -> {type, item_id}
+        self.cached_suggestions = {} # (type, item_id) -> suggestions dict
         self.current_status_label = None # Widget to update with status
         self._check_queue_status()
         
@@ -43,7 +44,7 @@ class StudyGUI:
         queued = status['queued']
         
         # Update status label if it exists
-        if self.current_status_label:
+        if self.current_status_label and self.current_status_label.winfo_exists():
             if queued > 0:
                 self.current_status_label.config(text=f"⏳ Processing: {queued} items queued...")
             else:
@@ -74,22 +75,41 @@ class StudyGUI:
             messagebox.showerror("Task Failed", f"Task {task_id} failed: {status.get('error')}")
             return
 
+        # Cache suggestions
+        suggestions = status.get('suggestions', {})
+        if suggestions:
+            if task_type in ['definition', 'explanation', 'examples']:
+                cache_key = ('word', item_id)
+            elif task_type == 'sentence_explanation':
+                cache_key = ('sentence', item_id)
+            elif task_type == 'grammar_explanation':
+                cache_key = ('grammar', item_id)
+            else:
+                cache_key = (task_type, item_id)
+            
+            if cache_key not in self.cached_suggestions:
+                self.cached_suggestions[cache_key] = {'flashcards': [], 'grammar': []}
+            
+            # Append new suggestions
+            self.cached_suggestions[cache_key]['flashcards'].extend(suggestions.get('flashcards', []))
+            self.cached_suggestions[cache_key]['grammar'].extend(suggestions.get('grammar', []))
+
         # Refresh UI if we are looking at this item
         if task_type in ['definition', 'explanation', 'examples'] and self.current_word_id == item_id:
             # We are likely in words view
-            if hasattr(self, 'words_listbox'): # Check if view is active
+            if hasattr(self, 'words_listbox') and self.words_listbox.winfo_exists(): 
                 self._on_word_selected(None) # Reload content
                 messagebox.showinfo("Complete", "Word generation complete!")
                 
         elif task_type == 'sentence_explanation' and self.current_sentence_id == item_id:
             # We are likely in sentence view
-            if hasattr(self, 'sentences_listbox'):
+            if hasattr(self, 'sentences_listbox') and self.sentences_listbox.winfo_exists():
                 self._on_sentence_selected(None) # Reload content
                 messagebox.showinfo("Complete", "Sentence explanation ready!")
                 
         elif task_type == 'grammar_explanation' and self.current_grammar_id == item_id:
             # We are in grammar view
-            if hasattr(self, 'grammar_listbox'):
+            if hasattr(self, 'grammar_listbox') and self.grammar_listbox.winfo_exists():
                 self._on_grammar_entry_selected(None) # Reload content
                 messagebox.showinfo("Complete", "Grammar explanation updated!")
     
@@ -222,10 +242,28 @@ Study Languages:
         
         ttk.Label(left_pane, text="Select Word", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
         
+        # Search & Sort controls
+        search_frame = ttk.Frame(left_pane)
+        search_frame.pack(fill="x", pady=(0, 5))
+        
+        self.word_search_var = tk.StringVar()
+        search_entry = ttk.Entry(search_frame, textvariable=self.word_search_var)
+        search_entry.pack(fill="x", side="top", pady=(0, 5))
+        search_entry.bind("<KeyRelease>", lambda e: self._filter_words())
+        
+        status_frame = ttk.Frame(search_frame)
+        status_frame.pack(fill="x")
+        
+        ttk.Label(status_frame, text="Status:").pack(side="left")
+        self.word_status_var = tk.StringVar(value="All")
+        status_filter = ttk.Combobox(status_frame, textvariable=self.word_status_var, values=["All", "Processed", "Unprocessed"], state="readonly", width=12)
+        status_filter.pack(side="left", padx=5)
+        status_filter.bind("<<ComboboxSelected>>", lambda e: self._filter_words())
+        
         list_scroll = ttk.Scrollbar(left_pane)
         list_scroll.pack(side="right", fill="y")
         
-        self.words_listbox = tk.Listbox(left_pane, yscrollcommand=list_scroll.set, height=12, font=("Arial", 10))
+        self.words_listbox = tk.Listbox(left_pane, yscrollcommand=list_scroll.set, height=15, font=("Arial", 10))
         self.words_listbox.pack(side="left", fill="both", expand=True)
         list_scroll.config(command=self.words_listbox.yview)
         
@@ -236,16 +274,43 @@ Study Languages:
         words = self.study_manager.get_imported_words()
         self.words_data = words
         if words:
-            for word_data in words:
-                status = "✓" if word_data['has_definition'] else "○"
-                display = f"{status} {word_data['word']}"
-                self.words_listbox.insert(tk.END, display)
+            self._filter_words()
         else:
             self.words_listbox.insert(tk.END, "(No words found)")
+            self.filtered_words_data = []
             
         # Batch Button
         if self.ollama_available:
             ttk.Button(left_pane, text="⚡ Batch Define (Missing)", command=self._start_batch_words).pack(fill="x", pady=5)
+
+    def _filter_words(self):
+        """Filter the words listbox based on search and status."""
+        if not hasattr(self, 'words_listbox') or not self.words_listbox.winfo_exists():
+            return
+            
+        search_query = self.word_search_var.get().lower().strip()
+        status_filter = self.word_status_var.get()
+        
+        filtered = self.words_data
+        
+        # Filter by search
+        if search_query:
+            filtered = [w for w in filtered if search_query in w['word'].lower()]
+            
+        # Filter by status
+        if status_filter == "Processed":
+            filtered = [w for w in filtered if w['has_definition']]
+        elif status_filter == "Unprocessed":
+            filtered = [w for w in filtered if not w['has_definition']]
+            
+        # Update UI
+        self.words_listbox.delete(0, tk.END)
+        self.filtered_words_data = filtered
+        
+        for w in filtered:
+            status = "✓" if w['has_definition'] else "○"
+            display = f"{status} {w['word']}"
+            self.words_listbox.insert(tk.END, display)
         
         # RIGHT PANE: Detail & Editor
         right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
@@ -311,6 +376,16 @@ Study Languages:
         self._bind_mousewheel(self.word_notes_text)
         
         ttk.Button(tab_notes, text="Save Changes", command=self._save_word_definition).pack(anchor="e", pady=5)
+        
+        # TAB 3: Related Items (Suggestions)
+        tab_related = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_related, text="Related Items")
+        
+        # Container for dynamic content
+        self.related_items_frame = ttk.Frame(tab_related)
+        self.related_items_frame.pack(fill="both", expand=True)
+        
+        ttk.Label(self.related_items_frame, text="AI Suggestions will appear here...", font=("Arial", 10, "italic"), foreground="gray").pack(pady=20)
     
     def _on_word_selected(self, event):
         """Handle word selection from listbox."""
@@ -319,7 +394,7 @@ Study Languages:
             return
         
         index = selection[0]
-        word_data = self.words_data[index]
+        word_data = self.filtered_words_data[index]
         self.current_word_id = word_data['id']
         
         # Update label
@@ -337,6 +412,9 @@ Study Languages:
             if definition['examples']:
                 self.word_examples_text.insert(tk.END, "\n".join(definition['examples']))
             self.word_notes_text.insert(tk.END, definition['notes'])
+            
+        # Update Related Items Tab
+        self._update_related_items_tab('word', self.current_word_id)
     
     def _save_word_definition(self):
         """Save the word definition."""
@@ -408,6 +486,74 @@ Study Languages:
         # Poke the status checker
         self._check_queue_status()
     
+    
+    # ========== SUGGESTIONS MANAGEMENT ==========
+    
+    def _update_related_items_tab(self, item_type, item_id):
+        """Update the Related Items tab with cached suggestions."""
+        if not hasattr(self, 'related_items_frame'):
+            return
+            
+        # Clear existing
+        for widget in self.related_items_frame.winfo_children():
+            widget.destroy()
+            
+        # Get suggestions
+        key = (item_type, item_id)
+        suggestions = self.cached_suggestions.get(key)
+        
+        if not suggestions or (not suggestions['flashcards'] and not suggestions['grammar']):
+            ttk.Label(self.related_items_frame, text="No suggestions available.\nGenerate content using AI to see related items.", 
+                     font=("Arial", 10, "italic"), foreground="gray", justify="center").pack(pady=20)
+            return
+            
+        # Render Flashcards
+        if suggestions['flashcards']:
+            ttk.Label(self.related_items_frame, text="Related Words (Flashcards)", font=("Arial", 10, "bold")).pack(anchor="w", pady=(10, 5))
+            for fc in suggestions['flashcards']:
+                f = ttk.Frame(self.related_items_frame, padding=5, relief="solid", borderwidth=1)
+                f.pack(fill="x", pady=2, padx=5)
+                
+                info = ttk.Frame(f)
+                info.pack(side="left", fill="x", expand=True)
+                ttk.Label(info, text=fc['word'], font=("Arial", 10, "bold")).pack(anchor="w")
+                ttk.Label(info, text=fc['definition'], font=("Arial", 9), wraplength=300).pack(anchor="w")
+                
+                # Check if already in a deck
+                matches = self.db.find_flashcard_by_question(fc['word'])
+                if matches:
+                    decks = list(set([m['deck_name'] for m in matches]))
+                    ttk.Label(f, text=f"✓ In {', '.join(decks)}", foreground="green", font=("Arial", 8, "italic")).pack(side="right", padx=5)
+                
+                ttk.Button(f, text="+ Add", width=6, 
+                          command=lambda w=fc['word'], d=fc['definition']: self._add_suggested_flashcard(w, d)).pack(side="right")
+                          
+        # Render Grammar
+        if suggestions['grammar']:
+            ttk.Label(self.related_items_frame, text="Related Grammar", font=("Arial", 10, "bold")).pack(anchor="w", pady=(15, 5))
+            for gp in suggestions['grammar']:
+                f = ttk.Frame(self.related_items_frame, padding=5, relief="solid", borderwidth=1)
+                f.pack(fill="x", pady=2, padx=5)
+                
+                info = ttk.Frame(f)
+                info.pack(side="left", fill="x", expand=True)
+                ttk.Label(info, text=gp['title'], font=("Arial", 10, "bold")).pack(anchor="w")
+                ttk.Label(info, text=gp['explanation'], font=("Arial", 9), wraplength=300).pack(anchor="w")
+                
+                ttk.Button(f, text="+ Add", width=6, 
+                          command=lambda t=gp['title'], e=gp['explanation']: self._add_suggested_grammar(t, e)).pack(side="right")
+
+    def _add_suggested_flashcard(self, word, definition):
+        """Open add dialog for suggested word."""
+        self._add_manual_word_dialog(initial_word=word, initial_def=definition)
+        
+    def _add_suggested_grammar(self, title, explanation):
+        """Add suggested grammar entry."""
+        if messagebox.askyesno("Add Grammar", f"Add '{title}' to Grammar Book?"):
+            self.study_manager.add_grammar_entry(title, explanation, tags="ai_suggestion")
+            messagebox.showinfo("Success", "Grammar entry added!")
+            # Optional: Refresh? No need unless we have a grammar list visible.
+            
     # ========== SENTENCES VIEW ==========
     
     def show_sentences_view(self):
@@ -436,10 +582,28 @@ Study Languages:
         
         ttk.Label(left_pane, text="Select Sentence", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
         
+        # Search & Sort controls
+        search_frame = ttk.Frame(left_pane)
+        search_frame.pack(fill="x", pady=(0, 5))
+        
+        self.sent_search_var = tk.StringVar()
+        search_entry = ttk.Entry(search_frame, textvariable=self.sent_search_var)
+        search_entry.pack(fill="x", side="top", pady=(0, 5))
+        search_entry.bind("<KeyRelease>", lambda e: self._filter_sentences())
+        
+        status_frame = ttk.Frame(search_frame)
+        status_frame.pack(fill="x")
+        
+        ttk.Label(status_frame, text="Status:").pack(side="left")
+        self.sent_status_var = tk.StringVar(value="All")
+        status_filter = ttk.Combobox(status_frame, textvariable=self.sent_status_var, values=["All", "Processed", "Unprocessed"], state="readonly", width=12)
+        status_filter.pack(side="left", padx=5)
+        status_filter.bind("<<ComboboxSelected>>", lambda e: self._filter_sentences())
+        
         list_scroll = ttk.Scrollbar(left_pane)
         list_scroll.pack(side="right", fill="y")
         
-        self.sentences_listbox = tk.Listbox(left_pane, font=("Arial", 9), yscrollcommand=list_scroll.set, width=30)
+        self.sentences_listbox = tk.Listbox(left_pane, font=("Arial", 9), yscrollcommand=list_scroll.set, width=30, height=15)
         self.sentences_listbox.pack(side="left", fill="both", expand=True)
         list_scroll.config(command=self.sentences_listbox.yview)
         
@@ -450,16 +614,43 @@ Study Languages:
         sentences = self.study_manager.get_imported_sentences()
         self.sentences_data = sentences
         if sentences:
-            for sent_data in sentences:
-                status = "✓" if sent_data['has_explanation'] else "○"
-                display = f"{status} {sent_data['sentence'][:40]}..."
-                self.sentences_listbox.insert(tk.END, display)
+            self._filter_sentences()
         else:
             self.sentences_listbox.insert(tk.END, "(No sentences found)")
+            self.filtered_sentences_data = []
             
         # Batch Button
         if self.ollama_available:
             ttk.Button(left_pane, text="⚡ Batch Explain (Missing)", command=self._start_batch_sentences).pack(fill="x", pady=5)
+
+    def _filter_sentences(self):
+        """Filter the sentences listbox based on search and status."""
+        if not hasattr(self, 'sentences_listbox') or not self.sentences_listbox.winfo_exists():
+            return
+            
+        search_query = self.sent_search_var.get().lower().strip()
+        status_filter = self.sent_status_var.get()
+        
+        filtered = self.sentences_data
+        
+        # Filter by search
+        if search_query:
+            filtered = [s for s in filtered if search_query in s['sentence'].lower()]
+            
+        # Filter by status
+        if status_filter == "Processed":
+            filtered = [s for s in filtered if s['has_explanation']]
+        elif status_filter == "Unprocessed":
+            filtered = [s for s in filtered if not s['has_explanation']]
+            
+        # Update UI
+        self.sentences_listbox.delete(0, tk.END)
+        self.filtered_sentences_data = filtered
+        
+        for s in filtered:
+            status = "✓" if s['has_explanation'] else "○"
+            display = f"{status} {s['sentence'][:40]}..."
+            self.sentences_listbox.insert(tk.END, display)
             
         # RIGHT PANE: Details & Editor
         right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
@@ -548,6 +739,15 @@ Study Languages:
         ttk.Button(input_frame, text="Ask", command=self._ask_followup_question).pack(side="right")
         ttk.Button(tab_chat, text="Clear History", command=self._clear_followup_history).pack(anchor="w", pady=5)
         
+        # TAB 5: Related Items (Suggestions)
+        tab_related = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_related, text="Related Items")
+        
+        # Container for dynamic content (reused name, but different instance per view)
+        self.related_items_frame = ttk.Frame(tab_related)
+        self.related_items_frame.pack(fill="both", expand=True)
+        ttk.Label(self.related_items_frame, text="AI Suggestions will appear here...", font=("Arial", 10, "italic"), foreground="gray").pack(pady=20)
+        
         # TAB 4: Settings (Focus Areas)
         tab_settings = ttk.Frame(self.notebook, padding="20")
         self.notebook.add(tab_settings, text="Settings")
@@ -568,7 +768,7 @@ Study Languages:
             return
         
         index = selection[0]
-        sent_data = self.sentences_data[index]
+        sent_data = self.filtered_sentences_data[index]
         self.current_sentence_id = sent_data['id']
         
         # Update sentence display
@@ -613,6 +813,9 @@ Study Languages:
             self.followup_history_text.delete(1.0, tk.END)
             self.followup_history_text.insert(tk.END, "(No explanation yet. Generate or enter an explanation first.)")
             self.followup_history_text.config(state="disabled")
+            
+        # Update Related Items Tab
+        self._update_related_items_tab('sentence', self.current_sentence_id)
     
     def _save_sentence_explanation(self):
         """Save the sentence explanation."""
@@ -834,13 +1037,20 @@ Study Languages:
         left_pane = ttk.Frame(paned_window)
         paned_window.add(left_pane, weight=1)
         
-        # Search Box
+        # Search & Sort Box
         search_frame = ttk.Frame(left_pane)
         search_frame.pack(fill="x", pady=(0, 5))
+        
         ttk.Label(search_frame, text="Search:").pack(side="left")
         self.grammar_search_var = tk.StringVar()
         self.grammar_search_var.trace("w", self._filter_grammar_entries)
-        ttk.Entry(search_frame, textvariable=self.grammar_search_var).pack(side="left", fill="x", expand=True, padx=5)
+        ttk.Entry(search_frame, textvariable=self.grammar_search_var, width=15).pack(side="left", padx=5)
+        
+        ttk.Label(search_frame, text="Sort:").pack(side="left")
+        self.grammar_sort_var = tk.StringVar(value="Updated")
+        sort_dropdown = ttk.Combobox(search_frame, textvariable=self.grammar_sort_var, values=["Updated", "A-Z"], state="readonly", width=8)
+        sort_dropdown.pack(side="left", padx=5)
+        sort_dropdown.bind("<<ComboboxSelected>>", lambda e: self._load_grammar_entries())
         
         # List
         list_scroll = ttk.Scrollbar(left_pane)
@@ -901,8 +1111,17 @@ Study Languages:
     def _load_grammar_entries(self):
         """Load grammar entries into listbox."""
         search = self.grammar_search_var.get()
-        self.grammar_entries = self.study_manager.get_grammar_entries(search)
+        sort_by = self.grammar_sort_var.get()
         
+        entries = self.study_manager.get_grammar_entries(search)
+        
+        # In-memory sorting
+        if sort_by == "A-Z":
+            entries = sorted(entries, key=lambda x: x['title'].lower())
+        else: # "Updated" - DB already returns it sorted by updated_at DESC usually, but let's be safe
+            entries = sorted(entries, key=lambda x: x['updated_at'], reverse=True)
+            
+        self.grammar_entries = entries
         self.grammar_listbox.delete(0, tk.END)
         for entry in self.grammar_entries:
             self.grammar_listbox.insert(tk.END, entry['title'])
@@ -1008,7 +1227,7 @@ Study Languages:
     
     # ========== MANUAL ENTRY METHODS ==========
 
-    def _add_manual_word_dialog(self):
+    def _add_manual_word_dialog(self, initial_word=None, initial_def=None):
         """Show dialog to manually add a word."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Add New Word")
@@ -1018,12 +1237,33 @@ Study Languages:
         
         # Word
         ttk.Label(dialog, text="Word/Phrase (Target Language):").pack(anchor="w", padx=20)
-        word_var = tk.StringVar()
-        ttk.Entry(dialog, textvariable=word_var, width=40).pack(padx=20, pady=(0, 10))
+        word_var = tk.StringVar(value=initial_word if initial_word else "")
+        word_entry = ttk.Entry(dialog, textvariable=word_var, width=40)
+        word_entry.pack(padx=20, pady=(0, 5))
+        
+        warning_label = ttk.Label(dialog, text="", foreground="orange", font=("Arial", 9, "italic"))
+        warning_label.pack()
+        
+        def check_duplicate(*args):
+            word = word_var.get().strip()
+            if not word:
+                warning_label.config(text="")
+                return
+            
+            matches = self.db.find_flashcard_by_question(word)
+            if matches:
+                decks = list(set([m['deck_name'] for m in matches]))
+                warning_label.config(text=f"⚠️ Already in deck(s): {', '.join(decks)}")
+            else:
+                warning_label.config(text="")
+        
+        word_var.trace("w", check_duplicate)
+        if initial_word:
+            check_duplicate()
         
         # Definition
         ttk.Label(dialog, text="Definition (Optional):").pack(anchor="w", padx=20)
-        def_var = tk.StringVar()
+        def_var = tk.StringVar(value=initial_def if initial_def else "")
         ttk.Entry(dialog, textvariable=def_var, width=40).pack(padx=20, pady=(0, 10))
         
         # Context
@@ -1035,6 +1275,18 @@ Study Languages:
             word = word_var.get().strip()
             definition = def_var.get().strip()
             context = context_text.get(1.0, tk.END).strip()
+            
+            if not word:
+                messagebox.showerror("Error", "Word is required")
+                return
+                
+            # Final duplicate check
+            matches = self.db.find_flashcard_by_question(word)
+            if matches:
+                decks = list(set([m['deck_name'] for m in matches]))
+                msg = f"'{word}' already exists in deck(s): {', '.join(decks)}.\n\nAdd it anyway?"
+                if not messagebox.askyesno("Duplicate Word", msg):
+                    return
             
             if not word:
                 messagebox.showwarning("Required", "Please enter a word or phrase.")
