@@ -125,10 +125,89 @@ class FlashcardDatabase:
                 updated_at TEXT
             )
         """)
+        # Create collections table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS collections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL, -- 'deck', 'word', 'sentence', 'grammar'
+                parent_id INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (parent_id) REFERENCES collections (id) ON DELETE SET NULL
+            )
+        """)
+        
+        # Migration: Add collection_id to existing tables
+        self._migrate_schema()
         
         self.conn.commit()
+
+    def _migrate_schema(self):
+        """Add collection_id columns to existing tables for backwards compatibility."""
+        cursor = self.conn.cursor()
+        
+        # Dictionary of tables and the columns they need
+        migrations = {
+            "decks": "collection_id",
+            "imported_content": "collection_id",
+            "grammar_book_entries": "collection_id"
+        }
+        
+        for table, column in migrations.items():
+            # Check if column exists
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = [info[1] for info in cursor.fetchall()]
+            
+            if column not in columns:
+                print(f"[DB] Migrating table {table}: adding {column}")
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} INTEGER REFERENCES collections(id) ON DELETE SET NULL")
+        
         self.conn.commit()
 
+    def create_collection(self, name: str, type: str, parent_id: int = None) -> int:
+        """Create a new collection and return its ID."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT INTO collections (name, type, parent_id, created_at) VALUES (?, ?, ?, ?)",
+            (name, type, parent_id, datetime.now().isoformat())
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_collections(self, type: str) -> list[dict]:
+        """Get all collections of a specific type."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id, name, parent_id FROM collections WHERE type = ? ORDER BY name", (type,))
+        cols = []
+        for row in cursor.fetchall():
+            cols.append({"id": row[0], "name": row[1], "parent_id": row[2]})
+        return cols
+
+    def delete_collection(self, collection_id: int):
+        """Delete a collection. Children collections and items will be 'uncategorized' (null)."""
+        cursor = self.conn.cursor()
+        # Set parent_id to NULL for children
+        cursor.execute("UPDATE collections SET parent_id = NULL WHERE parent_id = ?", (collection_id,))
+        # The ON DELETE SET NULL on other tables handles items
+        cursor.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
+        self.conn.commit()
+
+    def assign_to_collection(self, item_type: str, item_id: int, collection_id: int):
+        """Assign an item (deck, word, sentence, grammar) to a collection."""
+        cursor = self.conn.cursor()
+        table_map = {
+            'deck': 'decks',
+            'word': 'imported_content',
+            'sentence': 'imported_content',
+            'grammar': 'grammar_book_entries'
+        }
+        table = table_map.get(item_type)
+        if not table:
+            return False
+            
+        cursor.execute(f"UPDATE {table} SET collection_id = ? WHERE id = ?", (collection_id, item_id))
+        self.conn.commit()
+        return True
     def create_deck(self, name: str, description: str = "") -> int:
         """Create a new deck and return its ID."""
         cursor = self.conn.cursor()
@@ -145,7 +224,7 @@ class FlashcardDatabase:
     def get_all_decks(self) -> list[dict]:
         """Get all decks with their statistics."""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT id, name, description, created_at FROM decks ORDER BY name")
+        cursor.execute("SELECT id, name, description, created_at, collection_id FROM decks ORDER BY name")
         decks = []
         for row in cursor.fetchall():
             deck_id = row[0]
@@ -167,6 +246,7 @@ class FlashcardDatabase:
                 "name": row[1],
                 "description": row[2],
                 "created_at": row[3],
+                "collection_id": row[4],
                 "total_cards": total,
                 "due_cards": due
             })
@@ -508,7 +588,7 @@ class FlashcardDatabase:
         cursor = self.conn.cursor()
         if search_query:
             query = """
-                SELECT id, title, content, language, tags, created_at, updated_at
+                SELECT id, title, content, language, tags, created_at, updated_at, collection_id
                 FROM grammar_book_entries
                 WHERE title LIKE ? OR content LIKE ? OR tags LIKE ?
                 ORDER BY updated_at DESC
@@ -517,7 +597,7 @@ class FlashcardDatabase:
             cursor.execute(query, (search_pattern, search_pattern, search_pattern))
         else:
             cursor.execute("""
-                SELECT id, title, content, language, tags, created_at, updated_at
+                SELECT id, title, content, language, tags, created_at, updated_at, collection_id
                 FROM grammar_book_entries
                 ORDER BY updated_at DESC
             """)
@@ -531,7 +611,8 @@ class FlashcardDatabase:
                 "language": row[3],
                 "tags": row[4],
                 "created_at": row[5],
-                "updated_at": row[6]
+                "updated_at": row[6],
+                "collection_id": row[7]
             })
         return entries
 
@@ -539,7 +620,7 @@ class FlashcardDatabase:
         """Get a specific grammar book entry."""
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT id, title, content, language, tags, created_at, updated_at
+            SELECT id, title, content, language, tags, created_at, updated_at, collection_id
             FROM grammar_book_entries
             WHERE id = ?
         """, (entry_id,))
@@ -552,7 +633,8 @@ class FlashcardDatabase:
                 "language": row[3],
                 "tags": row[4],
                 "created_at": row[5],
-                "updated_at": row[6]
+                "updated_at": row[6],
+                "collection_id": row[7]
             }
         return None
 

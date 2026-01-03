@@ -4,21 +4,23 @@ Allows users to add/edit definitions for words and view/generate explanations fo
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog, scrolledtext
+from tkinter import ttk, messagebox, simpledialog, scrolledtext, filedialog
 from study_manager import StudyManager
 from database import FlashcardDatabase
 from ollama_integration import is_ollama_available
 from datetime import datetime
+import re
 
 
 class StudyGUI:
     """GUI for the study features."""
     
-    def __init__(self, root, db: FlashcardDatabase, study_manager: StudyManager):
+    def __init__(self, root, db: FlashcardDatabase, study_manager: StudyManager, io_manager):
         """Initialize the Study GUI."""
         self.root = root
         self.db = db
         self.study_manager = study_manager
+        self.io_manager = io_manager
         self.ollama_available = is_ollama_available()
         
         # Setup styles
@@ -232,85 +234,73 @@ Study Languages:
             action_cmd=self._add_manual_word_dialog
         )
         
-        # 2. Main Content (Split View)
-        paned_window = ttk.PanedWindow(main_frame, orient="horizontal")
+        # 2. Main Content (Integrated View)
+        # Wrap everything in a scrollable frame for stability
+        container = ttk.Frame(main_frame)
+        container.pack(fill="both", expand=True)
+        
+        canvas = tk.Canvas(container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollable_content = ttk.Frame(canvas, padding="5")
+        
+        scrollable_content.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=scrollable_content, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas.find_withtag("all")[0], width=event.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        paned_window = ttk.PanedWindow(scrollable_content, orient="horizontal")
         paned_window.pack(fill="both", expand=True)
         
-        # LEFT PANE: Word List
+        # LEFT PANE: Word Tree (Integrated)
         left_pane = ttk.Frame(paned_window)
         paned_window.add(left_pane, weight=1)
         
-        ttk.Label(left_pane, text="Select Word", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        ttk.Label(left_pane, text="Folders & Words", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
         
-        # Search & Sort controls
-        search_frame = ttk.Frame(left_pane)
-        search_frame.pack(fill="x", pady=(0, 5))
+        # Search & Status controls
+        ctrl_frame = ttk.Frame(left_pane)
+        ctrl_frame.pack(fill="x", pady=(0, 5))
         
         self.word_search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=self.word_search_var)
-        search_entry.pack(fill="x", side="top", pady=(0, 5))
-        search_entry.bind("<KeyRelease>", lambda e: self._filter_words())
+        search_entry = ttk.Entry(ctrl_frame, textvariable=self.word_search_var)
+        search_entry.pack(fill="x", pady=(0, 2))
+        search_entry.bind("<KeyRelease>", lambda e: self._update_words_view())
         
-        status_frame = ttk.Frame(search_frame)
+        status_frame = ttk.Frame(ctrl_frame)
         status_frame.pack(fill="x")
-        
         ttk.Label(status_frame, text="Status:").pack(side="left")
         self.word_status_var = tk.StringVar(value="All")
         status_filter = ttk.Combobox(status_frame, textvariable=self.word_status_var, values=["All", "Processed", "Unprocessed"], state="readonly", width=12)
         status_filter.pack(side="left", padx=5)
-        status_filter.bind("<<ComboboxSelected>>", lambda e: self._filter_words())
+        status_filter.bind("<<ComboboxSelected>>", lambda e: self._update_words_view())
         
-        list_scroll = ttk.Scrollbar(left_pane)
+        # Treeview Scrollbar
+        tree_frame = ttk.Frame(left_pane)
+        tree_frame.pack(fill="both", expand=True)
+        
+        list_scroll = ttk.Scrollbar(tree_frame)
+        self.words_tree = ttk.Treeview(tree_frame, show="tree", yscrollcommand=list_scroll.set)
+        self.words_tree.pack(side="left", fill="both", expand=True)
         list_scroll.pack(side="right", fill="y")
+        list_scroll.config(command=self.words_tree.yview)
         
-        self.words_listbox = tk.Listbox(left_pane, yscrollcommand=list_scroll.set, height=15, font=("Arial", 10))
-        self.words_listbox.pack(side="left", fill="both", expand=True)
-        list_scroll.config(command=self.words_listbox.yview)
+        self.words_tree.bind('<<TreeviewSelect>>', self._on_word_selected)
         
-        self.words_listbox.bind('<<ListboxSelect>>', self._on_word_selected)
-        self._bind_mousewheel(self.words_listbox)
-        
-        # Populate List
-        words = self.study_manager.get_imported_words()
-        self.words_data = words
-        if words:
-            self._filter_words()
-        else:
-            self.words_listbox.insert(tk.END, "(No words found)")
-            self.filtered_words_data = []
-            
-        # Batch Button
-        if self.ollama_available:
-            ttk.Button(left_pane, text="⚡ Batch Define (Missing)", command=self._start_batch_words).pack(fill="x", pady=5)
-
-    def _filter_words(self):
-        """Filter the words listbox based on search and status."""
-        if not hasattr(self, 'words_listbox') or not self.words_listbox.winfo_exists():
-            return
-            
-        search_query = self.word_search_var.get().lower().strip()
-        status_filter = self.word_status_var.get()
-        
-        filtered = self.words_data
-        
-        # Filter by search
-        if search_query:
-            filtered = [w for w in filtered if search_query in w['word'].lower()]
-            
-        # Filter by status
-        if status_filter == "Processed":
-            filtered = [w for w in filtered if w['has_definition']]
-        elif status_filter == "Unprocessed":
-            filtered = [w for w in filtered if not w['has_definition']]
-            
-        # Update UI
-        self.words_listbox.delete(0, tk.END)
-        self.filtered_words_data = filtered
-        
-        for w in filtered:
-            status = "✓" if w['has_definition'] else "○"
-            display = f"{status} {w['word']}"
-            self.words_listbox.insert(tk.END, display)
+        # Action Buttons below Tree
+        tree_btns = ttk.Frame(left_pane)
+        tree_btns.pack(fill="x", pady=5)
+        ttk.Button(tree_btns, text="📁 New Folder", command=lambda: self._manage_study_colls('word')).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text="📂 Move Item", command=lambda: self._move_item_to_coll('word')).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text="📤 Export JSON", command=lambda: self._export_study_items('word')).pack(side="left", padx=2, fill="x", expand=True)
         
         # RIGHT PANE: Detail & Editor
         right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
@@ -335,67 +325,120 @@ Study Languages:
         # TAB 1: Definition
         tab_def = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(tab_def, text="Definition")
-        
         self.word_definition_text = scrolledtext.ScrolledText(tab_def, font=("Arial", 10), wrap="word")
         self.word_definition_text.pack(fill="both", expand=True, pady=(0, 10))
         self._bind_mousewheel(self.word_definition_text)
         
-        # AI Actions Row
         ai_action_frame = ttk.Frame(tab_def)
         ai_action_frame.pack(fill="x")
-        
         if self.ollama_available:
             ttk.Button(ai_action_frame, text="📋 Generate Definition", command=lambda: self._generate_word_content('definition')).pack(side="left", padx=2)
             ttk.Button(ai_action_frame, text="📝 Generate Explanation", command=lambda: self._generate_word_content('explanation')).pack(side="left", padx=2)
-            
         ttk.Button(ai_action_frame, text="Save", command=self._save_word_definition).pack(side="right")
         
         # TAB 2: Examples & Notes
         tab_notes = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(tab_notes, text="Examples & Notes")
-        
         notes_paned = ttk.PanedWindow(tab_notes, orient="vertical")
         notes_paned.pack(fill="both", expand=True)
-        
-        # Examples Section
         ex_frame = ttk.LabelFrame(notes_paned, text="Examples", padding="5")
         notes_paned.add(ex_frame, weight=1)
         self.word_examples_text = scrolledtext.ScrolledText(ex_frame, height=5, font=("Arial", 10), wrap="word")
         self.word_examples_text.pack(fill="both", expand=True)
-        self._bind_mousewheel(self.word_examples_text)
-        
-        # AI Button for Examples inside the frame
         if self.ollama_available:
              ttk.Button(ex_frame, text="💬 Generate Examples", command=lambda: self._generate_word_content('examples')).pack(anchor="e", pady=2)
-        
-        # Notes Section
         notes_frame = ttk.LabelFrame(notes_paned, text="My Notes", padding="5")
         notes_paned.add(notes_frame, weight=1)
         self.word_notes_text = scrolledtext.ScrolledText(notes_frame, height=5, font=("Arial", 10), wrap="word")
         self.word_notes_text.pack(fill="both", expand=True)
-        self._bind_mousewheel(self.word_notes_text)
-        
         ttk.Button(tab_notes, text="Save Changes", command=self._save_word_definition).pack(anchor="e", pady=5)
         
-        # TAB 3: Related Items (Suggestions)
+        # TAB 3: Related Items
         tab_related = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(tab_related, text="Related Items")
-        
-        # Container for dynamic content
         self.related_items_frame = ttk.Frame(tab_related)
         self.related_items_frame.pack(fill="both", expand=True)
-        
         ttk.Label(self.related_items_frame, text="AI Suggestions will appear here...", font=("Arial", 10, "italic"), foreground="gray").pack(pady=20)
+        
+        # Populate Tree
+        self.words_data = self.study_manager.get_imported_words()
+        self._update_words_view()
+        
+        if self.ollama_available:
+            ttk.Button(left_pane, text="⚡ Batch Define (Missing)", command=self._start_batch_words).pack(fill="x", pady=5)
+
+    def _update_words_view(self):
+        """Update the words treeview with folders and items."""
+        if not hasattr(self, 'words_tree') or not self.words_tree.winfo_exists():
+            return
+            
+        search_query = self.word_search_var.get().lower().strip()
+        status_filter = self.word_status_var.get()
+        
+        # Clear tree
+        for item in self.words_tree.get_children():
+            self.words_tree.delete(item)
+            
+        # Get data
+        colls = self.db.get_collections('word')
+        words = self.words_data
+        
+        # Filter words
+        filtered_words = []
+        for w in words:
+            match = True
+            if search_query and search_query not in w['word'].lower(): match = False
+            if status_filter == "Processed" and not w['has_definition']: match = False
+            if status_filter == "Unprocessed" and w['has_definition']: match = False
+            if match: filtered_words.append(w)
+        
+        self.filtered_words_data = filtered_words
+        
+        # Map folders
+        folder_nodes = {}
+        remaining = list(colls)
+        max_iters = 5
+        while remaining and max_iters > 0:
+            max_iters -= 1
+            for i in range(len(remaining)-1, -1, -1):
+                c = remaining[i]
+                parent = ""
+                if c['parent_id'] and f"coll_{c['parent_id']}" in folder_nodes: parent = f"coll_{c['parent_id']}"
+                elif c['parent_id'] is None: parent = ""
+                else: continue
+                node = self.words_tree.insert(parent, "end", iid=f"coll_{c['id']}", text=f"📁 {c['name']}", open=True)
+                folder_nodes[f"coll_{c['id']}"] = node
+                remaining.pop(i)
+        
+        for c in remaining: self.words_tree.insert("", "end", iid=f"coll_{c['id']}", text=f"📁 {c['name']}", open=True)
+
+        # Insert Words
+        uncategorized_node = None
+        for w in filtered_words:
+            parent = ""
+            if w['collection_id'] and f"coll_{w['collection_id']}" in folder_nodes: parent = f"coll_{w['collection_id']}"
+            else:
+                if not uncategorized_node: uncategorized_node = self.words_tree.insert("", "end", text="📦 Uncategorized", open=True)
+                parent = uncategorized_node
+            status = "✓" if w['has_definition'] else "○"
+            self.words_tree.insert(parent, "end", iid=f"word_{w['id']}", text=f"{status} {w['word']}")
     
     def _on_word_selected(self, event):
-        """Handle word selection from listbox."""
-        selection = self.words_listbox.curselection()
+        """Handle word selection from treeview."""
+        selection = self.words_tree.selection()
         if not selection:
             return
         
-        index = selection[0]
-        word_data = self.filtered_words_data[index]
-        self.current_word_id = word_data['id']
+        iid = selection[0]
+        if not iid.startswith("word_"):
+            return # Folders don't have details
+            
+        word_id = int(iid.split("_")[1])
+        self.current_word_id = word_id
+        
+        # Find data
+        word_data = next((w for w in self.words_data if w['id'] == word_id), None)
+        if not word_data: return
         
         # Update label
         self.word_label.config(text=f"Word: {word_data['word']}")
@@ -572,223 +615,227 @@ Study Languages:
             action_cmd=self._add_manual_sentence_dialog
         )
         
-        # 2. Main Content (Split View)
-        paned_window = ttk.PanedWindow(main_frame, orient="horizontal")
+        # 2. Main Content (Integrated View)
+        container = ttk.Frame(main_frame)
+        container.pack(fill="both", expand=True)
+        
+        canvas = tk.Canvas(container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollable_content = ttk.Frame(canvas, padding="5")
+        
+        scrollable_content.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_content, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        def _on_canvas_configure(event): canvas.itemconfig(canvas.find_withtag("all")[0], width=event.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        paned_window = ttk.PanedWindow(scrollable_content, orient="horizontal")
         paned_window.pack(fill="both", expand=True)
         
-        # LEFT PANE: Sentence List
+        # LEFT PANE: Sentence Tree
         left_pane = ttk.Frame(paned_window)
         paned_window.add(left_pane, weight=1)
+        ttk.Label(left_pane, text="Folders & Sentences", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
         
-        ttk.Label(left_pane, text="Select Sentence", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
-        
-        # Search & Sort controls
-        search_frame = ttk.Frame(left_pane)
-        search_frame.pack(fill="x", pady=(0, 5))
-        
+        ctrl_frame = ttk.Frame(left_pane)
+        ctrl_frame.pack(fill="x", pady=(0, 5))
         self.sent_search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=self.sent_search_var)
-        search_entry.pack(fill="x", side="top", pady=(0, 5))
-        search_entry.bind("<KeyRelease>", lambda e: self._filter_sentences())
+        search_entry = ttk.Entry(ctrl_frame, textvariable=self.sent_search_var)
+        search_entry.pack(fill="x", pady=(0, 2))
+        search_entry.bind("<KeyRelease>", lambda e: self._update_sentences_view())
         
-        status_frame = ttk.Frame(search_frame)
+        status_frame = ttk.Frame(ctrl_frame)
         status_frame.pack(fill="x")
-        
         ttk.Label(status_frame, text="Status:").pack(side="left")
         self.sent_status_var = tk.StringVar(value="All")
         status_filter = ttk.Combobox(status_frame, textvariable=self.sent_status_var, values=["All", "Processed", "Unprocessed"], state="readonly", width=12)
         status_filter.pack(side="left", padx=5)
-        status_filter.bind("<<ComboboxSelected>>", lambda e: self._filter_sentences())
+        status_filter.bind("<<ComboboxSelected>>", lambda e: self._update_sentences_view())
         
-        list_scroll = ttk.Scrollbar(left_pane)
+        tree_frame = ttk.Frame(left_pane)
+        tree_frame.pack(fill="both", expand=True)
+        list_scroll = ttk.Scrollbar(tree_frame)
+        self.sentences_tree = ttk.Treeview(tree_frame, show="tree", yscrollcommand=list_scroll.set)
+        self.sentences_tree.pack(side="left", fill="both", expand=True)
         list_scroll.pack(side="right", fill="y")
+        list_scroll.config(command=self.sentences_tree.yview)
+        self.sentences_tree.bind('<<TreeviewSelect>>', self._on_sentence_selected)
         
-        self.sentences_listbox = tk.Listbox(left_pane, font=("Arial", 9), yscrollcommand=list_scroll.set, width=30, height=15)
-        self.sentences_listbox.pack(side="left", fill="both", expand=True)
-        list_scroll.config(command=self.sentences_listbox.yview)
+        tree_btns = ttk.Frame(left_pane)
+        tree_btns.pack(fill="x", pady=5)
+        ttk.Button(tree_btns, text="📁 New Folder", command=lambda: self._manage_study_colls('sentence')).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text="📂 Move Item", command=lambda: self._move_item_to_coll('sentence')).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text="📤 Export JSON", command=lambda: self._export_study_items('sentence')).pack(side="left", padx=2, fill="x", expand=True)
         
-        self.sentences_listbox.bind('<<ListboxSelect>>', self._on_sentence_selected)
-        self._bind_mousewheel(self.sentences_listbox)
+        # RIGHT PANE: Detail & Editor
+        right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
+        paned_window.add(right_pane, weight=3)
         
-        # Populate List
-        sentences = self.study_manager.get_imported_sentences()
-        self.sentences_data = sentences
-        if sentences:
-            self._filter_sentences()
-        else:
-            self.sentences_listbox.insert(tk.END, "(No sentences found)")
-            self.filtered_sentences_data = []
-            
-        # Batch Button
+        status_row = ttk.Frame(right_pane)
+        status_row.pack(fill="x", pady=(0, 5))
+        self.current_status_label = ttk.Label(status_row, text="", font=("Arial", 9, "italic"), foreground="blue")
+        self.current_status_label.pack(side="right")
+        
+        target_frame = ttk.LabelFrame(right_pane, text="Target Sentence", padding="10")
+        target_frame.pack(fill="x", pady=(0, 10))
+        self.sentence_display_text = scrolledtext.ScrolledText(target_frame, height=3, font=("Arial", 11), wrap="word", state="disabled")
+        self.sentence_display_text.pack(fill="both", expand=True)
+        
+        self.notebook = ttk.Notebook(right_pane)
+        self.notebook.pack(fill="both", expand=True)
+        
+        # Tabs
+        tab_explanation = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_explanation, text="AI Explanation")
+        self.sentence_explanation_text = scrolledtext.ScrolledText(tab_explanation, font=("Arial", 10), wrap="word")
+        self.sentence_explanation_text.pack(fill="both", expand=True, pady=(0, 10))
+        
+        ai_action_frame = ttk.Frame(tab_explanation)
+        ai_action_frame.pack(fill="x")
         if self.ollama_available:
-            ttk.Button(left_pane, text="⚡ Batch Explain (Missing)", command=self._start_batch_sentences).pack(fill="x", pady=5)
+            ttk.Button(ai_action_frame, text="💬 Explain", command=self._generate_sentence_explanation_multi).pack(side="left", padx=2)
+        ttk.Button(ai_action_frame, text="Save", command=self._save_sentence_explanation).pack(side="right")
+        
+        tab_grammar = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_grammar, text="Grammar Notes")
+        self.sentence_grammar_text = scrolledtext.ScrolledText(tab_grammar, font=("Arial", 10), wrap="word")
+        self.sentence_grammar_text.pack(fill="both", expand=True)
+        ttk.Button(tab_grammar, text="Save", command=self._save_sentence_explanation).pack(anchor="e", pady=5)
+        
+        tab_notes = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_notes, text="Personal Notes")
+        self.sentence_notes_text = scrolledtext.ScrolledText(tab_notes, font=("Arial", 10), wrap="word")
+        self.sentence_notes_text.pack(fill="both", expand=True)
+        ttk.Button(tab_notes, text="Save", command=self._save_sentence_explanation).pack(anchor="e", pady=5)
 
-    def _filter_sentences(self):
-        """Filter the sentences listbox based on search and status."""
-        if not hasattr(self, 'sentences_listbox') or not self.sentences_listbox.winfo_exists():
+        tab_chat = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_chat, text="Follow-up Chat")
+        self.followup_history_text = scrolledtext.ScrolledText(tab_chat, font=("Arial", 10), wrap="word", state="disabled")
+        self.followup_history_text.pack(fill="both", expand=True, pady=(0, 10))
+        input_frame = ttk.Frame(tab_chat)
+        input_frame.pack(fill="x")
+        self.followup_question_text = tk.Text(input_frame, height=2, font=("Arial", 10))
+        self.followup_question_text.pack(fill="x", side="left", expand=True, padx=(0, 5))
+        ttk.Button(input_frame, text="Ask", command=self._ask_followup_question).pack(side="right")
+        
+        tab_related = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(tab_related, text="Related Items")
+        self.related_items_frame = ttk.Frame(tab_related)
+        self.related_items_frame.pack(fill="both", expand=True)
+        
+        tab_settings = ttk.Frame(self.notebook, padding="20")
+        self.notebook.add(tab_settings, text="Settings")
+        ttk.Label(tab_settings, text="Select Focus Areas:", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 10))
+        self.focus_vars = {}
+        for focus in ["grammar", "vocabulary", "context", "pronunciation", "all"]:
+            self.focus_vars[focus] = tk.BooleanVar(value=(focus == 'all'))
+            ttk.Checkbutton(tab_settings, text=focus.capitalize(), variable=self.focus_vars[focus]).pack(anchor="w", pady=2)
+
+        # Populate
+        self.sentences_data = self.study_manager.get_imported_sentences()
+        self._update_sentences_view()
+        if self.ollama_available:
+            ttk.Button(left_pane, text="⚡ Batch Explain", command=self._start_batch_sentences).pack(fill="x", pady=5)
+
+    def _update_sentences_view(self):
+        """Update the sentences treeview with folders and items."""
+        if not hasattr(self, 'sentences_tree') or not self.sentences_tree.winfo_exists():
             return
             
         search_query = self.sent_search_var.get().lower().strip()
         status_filter = self.sent_status_var.get()
         
-        filtered = self.sentences_data
-        
-        # Filter by search
-        if search_query:
-            filtered = [s for s in filtered if search_query in s['sentence'].lower()]
+        # Clear tree
+        for item in self.sentences_tree.get_children():
+            self.sentences_tree.delete(item)
             
-        # Filter by status
-        if status_filter == "Processed":
-            filtered = [s for s in filtered if s['has_explanation']]
-        elif status_filter == "Unprocessed":
-            filtered = [s for s in filtered if not s['has_explanation']]
-            
-        # Update UI
-        self.sentences_listbox.delete(0, tk.END)
-        self.filtered_sentences_data = filtered
+        # Get data
+        colls = self.db.get_collections('sentence')
+        sentences = self.sentences_data
         
-        for s in filtered:
-            status = "✓" if s['has_explanation'] else "○"
-            display = f"{status} {s['sentence'][:40]}..."
-            self.sentences_listbox.insert(tk.END, display)
-            
-        # RIGHT PANE: Details & Editor
-        right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
-        paned_window.add(right_pane, weight=3)
+        # Filter sentences
+        filtered_sents = []
+        for s in sentences:
+            match = True
+            if search_query and search_query not in s['sentence'].lower():
+                match = False
+            if status_filter == "Processed" and not s['has_explanation']:
+                match = False
+            if status_filter == "Unprocessed" and s['has_explanation']:
+                match = False
+            if match:
+                filtered_sents.append(s)
         
-        # Status Label Row
-        status_frame = ttk.Frame(right_pane)
-        status_frame.pack(fill="x", pady=(0, 5))
-        self.current_status_label = ttk.Label(status_frame, text="", font=("Arial", 9, "italic"), foreground="blue")
-        self.current_status_label.pack(side="right")
+        self.filtered_sentences_data = filtered_sents
         
-        # Target Sentence Display (Always Visible)
-        target_frame = ttk.LabelFrame(right_pane, text="Target Sentence", padding="10")
-        target_frame.pack(fill="x", pady=(0, 10))
+        # Map folders
+        folder_nodes = {}
+        remaining = list(colls)
+        max_iters = 5
+        while remaining and max_iters > 0:
+            max_iters -= 1
+            for i in range(len(remaining)-1, -1, -1):
+                c = remaining[i]
+                parent = ""
+                if c['parent_id'] and f"coll_{c['parent_id']}" in folder_nodes:
+                    parent = f"coll_{c['parent_id']}"
+                elif c['parent_id'] is None:
+                    parent = ""
+                else: continue
+                
+                node = self.sentences_tree.insert(parent, "end", iid=f"coll_{c['id']}", text=f"📁 {c['name']}", open=True)
+                folder_nodes[f"coll_{c['id']}"] = node
+                remaining.pop(i)
         
-        self.sentence_display_text = scrolledtext.ScrolledText(target_frame, height=3, font=("Arial", 11), wrap="word", state="disabled")
-        self.sentence_display_text.pack(fill="both", expand=True)
-        self._bind_mousewheel(self.sentence_display_text)
-        
-        # TABS for Details
-        self.notebook = ttk.Notebook(right_pane)
-        self.notebook.pack(fill="both", expand=True)
-        
-        # TAB 1: Explanation (AI)
-        tab_explanation = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(tab_explanation, text="AI Explanation")
-        
-        self.sentence_explanation_text = scrolledtext.ScrolledText(tab_explanation, font=("Arial", 10), wrap="word")
-        self.sentence_explanation_text.pack(fill="both", expand=True, pady=(0, 10))
-        self._bind_mousewheel(self.sentence_explanation_text)
-        
-        # AI Actions Row
-        ai_action_frame = ttk.Frame(tab_explanation)
-        ai_action_frame.pack(fill="x")
-        
-        if self.ollama_available:
-            ttk.Button(ai_action_frame, text="✨ Generate/Regenerate Explanation", command=self._generate_sentence_explanation_multi).pack(side="left")
-        
-        ttk.Button(ai_action_frame, text="Save Changes", command=self._save_sentence_explanation).pack(side="right")
+        # Insert any orphaned folders to root
+        for c in remaining:
+            self.sentences_tree.insert("", "end", iid=f"coll_{c['id']}", text=f"📁 {c['name']}", open=True)
 
-        # TAB 2: Notes & Grammar
-        tab_notes = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(tab_notes, text="My Notes & Grammar")
-        
-        # Split Notes into Grammar (Top) and Personal (Bottom) or Left/Right
-        notes_paned = ttk.PanedWindow(tab_notes, orient="vertical")
-        notes_paned.pack(fill="both", expand=True)
-        
-        # Grammar Note Section
-        grammar_frame = ttk.LabelFrame(notes_paned, text="Grammar Notes", padding="5")
-        notes_paned.add(grammar_frame, weight=1)
-        self.sentence_grammar_text = scrolledtext.ScrolledText(grammar_frame, height=5, font=("Arial", 10), wrap="word")
-        self.sentence_grammar_text.pack(fill="both", expand=True)
-        self._bind_mousewheel(self.sentence_grammar_text)
-        
-        # Personal Note Section
-        personal_frame = ttk.LabelFrame(notes_paned, text="Personal Notes", padding="5")
-        notes_paned.add(personal_frame, weight=1)
-        self.sentence_notes_text = scrolledtext.ScrolledText(personal_frame, height=5, font=("Arial", 10), wrap="word")
-        self.sentence_notes_text.pack(fill="both", expand=True)
-        self._bind_mousewheel(self.sentence_notes_text)
-        
-        ttk.Button(tab_notes, text="Save Notes", command=self._save_sentence_explanation).pack(anchor="e", pady=5)
-        
-        # TAB 3: Talk to AI (Follow-up)
-        tab_chat = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(tab_chat, text="Ask AI")
-        
-        chat_history_frame = ttk.Frame(tab_chat)
-        chat_history_frame.pack(fill="both", expand=True, pady=(0, 10))
-        
-        self.followup_history_text = scrolledtext.ScrolledText(chat_history_frame, state="disabled", font=("Arial", 10), wrap="word")
-        self.followup_history_text.pack(side="left", fill="both", expand=True)
-        chat_scroll = ttk.Scrollbar(chat_history_frame, command=self.followup_history_text.yview)
-        chat_scroll.pack(side="right", fill="y")
-        self.followup_history_text.config(yscrollcommand=chat_scroll.set)
-        self._bind_mousewheel(self.followup_history_text)
-        
-        input_frame = ttk.Frame(tab_chat)
-        input_frame.pack(fill="x")
-        
-        self.followup_question_text = scrolledtext.ScrolledText(input_frame, height=3, font=("Arial", 10), wrap="word")
-        self.followup_question_text.pack(side="left", fill="both", expand=True, padx=(0, 5))
-        self._bind_mousewheel(self.followup_question_text)
-        
-        ttk.Button(input_frame, text="Ask", command=self._ask_followup_question).pack(side="right")
-        ttk.Button(tab_chat, text="Clear History", command=self._clear_followup_history).pack(anchor="w", pady=5)
-        
-        # TAB 5: Related Items (Suggestions)
-        tab_related = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(tab_related, text="Related Items")
-        
-        # Container for dynamic content (reused name, but different instance per view)
-        self.related_items_frame = ttk.Frame(tab_related)
-        self.related_items_frame.pack(fill="both", expand=True)
-        ttk.Label(self.related_items_frame, text="AI Suggestions will appear here...", font=("Arial", 10, "italic"), foreground="gray").pack(pady=20)
-        
-        # TAB 4: Settings (Focus Areas)
-        tab_settings = ttk.Frame(self.notebook, padding="20")
-        self.notebook.add(tab_settings, text="Settings")
-        
-        ttk.Label(tab_settings, text="Select Focus Areas for AI Generation:", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 10))
-        
-        self.focus_vars = {}
-        for focus in ["grammar", "vocabulary", "context", "pronunciation", "all"]:
-            self.focus_vars[focus] = tk.BooleanVar(value=(focus == 'all'))
-            ttk.Checkbutton(tab_settings, text=focus.capitalize(), variable=self.focus_vars[focus]).pack(anchor="w", pady=2)
+        # Insert Sentences
+        uncategorized_node = None
+        for s in filtered_sents:
+            parent = ""
+            if s['collection_id'] and f"coll_{s['collection_id']}" in folder_nodes:
+                parent = f"coll_{s['collection_id']}"
+            else:
+                if not uncategorized_node:
+                    uncategorized_node = self.sentences_tree.insert("", "end", text="📦 Uncategorized", open=True)
+                parent = uncategorized_node
             
-        self.current_sentence_explanation_id = None
-    
+            status = "✓" if s['has_explanation'] else "○"
+            snippet = s['sentence'][:30] + ("..." if len(s['sentence']) > 30 else "")
+            self.sentences_tree.insert(parent, "end", iid=f"sent_{s['id']}", text=f"{status} {snippet}")
+
     def _on_sentence_selected(self, event):
-        """Handle sentence selection from listbox."""
-        selection = self.sentences_listbox.curselection()
-        if not selection:
-            return
+        """Handle sentence selection from treeview."""
+        selection = self.sentences_tree.selection()
+        if not selection: return
+        iid = selection[0]
+        if not iid.startswith("sent_"): return
+            
+        sent_id = int(iid.split("_")[1])
+        self.current_sentence_id = sent_id
         
-        index = selection[0]
-        sent_data = self.filtered_sentences_data[index]
-        self.current_sentence_id = sent_data['id']
+        sent_data = next((s for s in self.sentences_data if s['id'] == sent_id), None)
+        if not sent_data: return
         
-        # Update sentence display
-        self.sentence_display_text.config(state="normal")
-        self.sentence_display_text.delete(1.0, tk.END)
-        self.sentence_display_text.insert(tk.END, sent_data['sentence'])
-        self.sentence_display_text.config(state="disabled")
+        # Update widgets instead of re-creating them
+        if hasattr(self, 'sentence_display_text'):
+            self.sentence_display_text.config(state="normal")
+            self.sentence_display_text.delete(1.0, tk.END)
+            self.sentence_display_text.insert(tk.END, sent_data['sentence'])
+            self.sentence_display_text.config(state="disabled")
         
-        # Load existing explanation
         explanation = self.study_manager.get_sentence_explanation(self.current_sentence_id)
         
         self.sentence_explanation_text.delete(1.0, tk.END)
         self.sentence_grammar_text.delete(1.0, tk.END)
         self.sentence_notes_text.delete(1.0, tk.END)
-        
-        # Reset checkboxes
-        for focus in self.focus_vars:
-            self.focus_vars[focus].set(False)
-        
-        # Clear follow-up question input and history
+        for focus in self.focus_vars: self.focus_vars[focus].set(False)
         self.followup_question_text.delete(1.0, tk.END)
         self.current_sentence_explanation_id = None
         
@@ -796,25 +843,17 @@ Study Languages:
             self.sentence_explanation_text.insert(tk.END, explanation['explanation'])
             self.sentence_grammar_text.insert(tk.END, explanation['grammar_notes'])
             self.sentence_notes_text.insert(tk.END, explanation['user_notes'])
-            # Set checkbox for the focus area if stored
             if explanation.get('focus_area') and explanation['focus_area'] in self.focus_vars:
                 self.focus_vars[explanation['focus_area']].set(True)
-            
-            # Store explanation ID for follow-ups
             self.current_sentence_explanation_id = explanation['id']
-            
-            # Load follow-up history
             self._load_followup_history()
         else:
-            # Default to "all" if no explanation exists
             self.focus_vars['all'].set(True)
-            # Clear follow-up history
             self.followup_history_text.config(state="normal")
             self.followup_history_text.delete(1.0, tk.END)
             self.followup_history_text.insert(tk.END, "(No explanation yet. Generate or enter an explanation first.)")
             self.followup_history_text.config(state="disabled")
             
-        # Update Related Items Tab
         self._update_related_items_tab('sentence', self.current_sentence_id)
     
     def _save_sentence_explanation(self):
@@ -1011,12 +1050,6 @@ Study Languages:
         """Show the grammar book view."""
         self.clear_window()
         
-        main_frame = ttk.Frame(self.root, padding="20")
-        main_frame.pack(fill="both", expand=True)
-    def show_grammar_book_view(self):
-        """Show the grammar book view."""
-        self.clear_window()
-        
         main_frame = ttk.Frame(self.root, padding="15")
         main_frame.pack(fill="both", expand=True)
         
@@ -1029,39 +1062,74 @@ Study Languages:
             action_cmd=self._new_grammar_entry
         )
         
-        # 2. Main Content (Split View)
-        paned_window = ttk.PanedWindow(main_frame, orient="horizontal")
+        # 2. Main Content (Integrated View)
+        container = ttk.Frame(main_frame)
+        container.pack(fill="both", expand=True)
+        
+        canvas = tk.Canvas(container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollable_content = ttk.Frame(canvas, padding="5")
+        
+        scrollable_content.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=scrollable_content, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas.find_withtag("all")[0], width=event.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        paned_window = ttk.PanedWindow(scrollable_content, orient="horizontal")
         paned_window.pack(fill="both", expand=True)
         
-        # LEFT PANE: Entry List
+        # LEFT PANE: Grammar Tree (Integrated)
         left_pane = ttk.Frame(paned_window)
         paned_window.add(left_pane, weight=1)
         
-        # Search & Sort Box
-        search_frame = ttk.Frame(left_pane)
-        search_frame.pack(fill="x", pady=(0, 5))
+        ttk.Label(left_pane, text="Folders & Entries", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
         
-        ttk.Label(search_frame, text="Search:").pack(side="left")
+        # Search & Sort controls
+        ctrl_frame = ttk.Frame(left_pane)
+        ctrl_frame.pack(fill="x", pady=(0, 5))
+        
         self.grammar_search_var = tk.StringVar()
         self.grammar_search_var.trace("w", self._filter_grammar_entries)
-        ttk.Entry(search_frame, textvariable=self.grammar_search_var, width=15).pack(side="left", padx=5)
+        ttk.Entry(ctrl_frame, textvariable=self.grammar_search_var, width=15).pack(fill="x", pady=(0, 2))
         
-        ttk.Label(search_frame, text="Sort:").pack(side="left")
+        sort_frame = ttk.Frame(ctrl_frame)
+        sort_frame.pack(fill="x")
+        ttk.Label(sort_frame, text="Sort:").pack(side="left")
         self.grammar_sort_var = tk.StringVar(value="Updated")
-        sort_dropdown = ttk.Combobox(search_frame, textvariable=self.grammar_sort_var, values=["Updated", "A-Z"], state="readonly", width=8)
+        sort_dropdown = ttk.Combobox(sort_frame, textvariable=self.grammar_sort_var, values=["Updated", "A-Z"], state="readonly", width=10)
         sort_dropdown.pack(side="left", padx=5)
-        sort_dropdown.bind("<<ComboboxSelected>>", lambda e: self._load_grammar_entries())
+        sort_dropdown.bind("<<ComboboxSelected>>", lambda e: self._update_grammar_view())
         
-        # List
-        list_scroll = ttk.Scrollbar(left_pane)
+        # Treeview Scrollbar
+        tree_frame = ttk.Frame(left_pane)
+        tree_frame.pack(fill="both", expand=True)
+        
+        list_scroll = ttk.Scrollbar(tree_frame)
+        self.grammar_tree = ttk.Treeview(tree_frame, show="tree", yscrollcommand=list_scroll.set)
+        self.grammar_tree.pack(side="left", fill="both", expand=True)
         list_scroll.pack(side="right", fill="y")
+        list_scroll.config(command=self.grammar_tree.yview)
         
-        self.grammar_listbox = tk.Listbox(left_pane, font=("Arial", 10), yscrollcommand=list_scroll.set)
-        self.grammar_listbox.pack(side="left", fill="both", expand=True)
-        list_scroll.config(command=self.grammar_listbox.yview)
+        self.grammar_tree.bind('<<TreeviewSelect>>', self._on_grammar_entry_selected)
         
-        self.grammar_listbox.bind('<<ListboxSelect>>', self._on_grammar_entry_selected)
-        self._bind_mousewheel(self.grammar_listbox)
+        # Action Buttons below Tree
+        tree_btns = ttk.Frame(left_pane)
+        tree_btns.pack(fill="x", pady=5)
+        ttk.Button(tree_btns, text="📁 New Folder", command=lambda: self._manage_study_colls('grammar')).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text="📂 Move Item", command=lambda: self._move_item_to_coll('grammar')).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text="📤 Export JSON", command=lambda: self._export_study_items('grammar')).pack(side="left", padx=2, fill="x", expand=True)
+        
+        # Populate Tree
+        self._update_grammar_view()
         
         # RIGHT PANE: Editor
         right_panel = ttk.LabelFrame(paned_window, text="Entry Editor", padding="15")
@@ -1106,44 +1174,108 @@ Study Languages:
         
         # Load entries
         self.current_grammar_id = None
-        self._load_grammar_entries()
+        self._update_grammar_view()
         
-    def _load_grammar_entries(self):
-        """Load grammar entries into listbox."""
+    def _update_grammar_view(self):
+        """Update the grammar treeview with folders and items."""
+        if not hasattr(self, 'grammar_tree') or not self.grammar_tree.winfo_exists():
+            return
+            
         search = self.grammar_search_var.get()
         sort_by = self.grammar_sort_var.get()
         
+        # Clear tree
+        for item in self.grammar_tree.get_children():
+            self.grammar_tree.delete(item)
+            
         entries = self.study_manager.get_grammar_entries(search)
+        colls = self.db.get_collections('grammar')
         
         # In-memory sorting
         if sort_by == "A-Z":
             entries = sorted(entries, key=lambda x: x['title'].lower())
-        else: # "Updated" - DB already returns it sorted by updated_at DESC usually, but let's be safe
+        else:
             entries = sorted(entries, key=lambda x: x['updated_at'], reverse=True)
             
         self.grammar_entries = entries
-        self.grammar_listbox.delete(0, tk.END)
-        for entry in self.grammar_entries:
-            self.grammar_listbox.insert(tk.END, entry['title'])
+        
+        # Map folders
+        folder_nodes = {}
+        remaining = list(colls)
+        max_iters = 5
+        while remaining and max_iters > 0:
+            max_iters -= 1
+            for i in range(len(remaining)-1, -1, -1):
+                c = remaining[i]
+                parent = ""
+                if c['parent_id'] and f"coll_{c['parent_id']}" in folder_nodes:
+                    parent = f"coll_{c['parent_id']}"
+                elif c['parent_id'] is None: parent = ""
+                else: continue
+                
+                node = self.grammar_tree.insert(parent, "end", iid=f"coll_{c['id']}", text=f"📁 {c['name']}", open=True)
+                folder_nodes[f"coll_{c['id']}"] = node
+                remaining.pop(i)
+        
+        for c in remaining:
+            self.grammar_tree.insert("", "end", iid=f"coll_{c['id']}", text=f"📁 {c['name']}", open=True)
+
+        # Insert Entries
+        uncategorized_node = None
+        for e in entries:
+            parent = ""
+            if e['collection_id'] and f"coll_{e['collection_id']}" in folder_nodes:
+                parent = f"coll_{e['collection_id']}"
+            else:
+                if not uncategorized_node:
+                    uncategorized_node = self.grammar_tree.insert("", "end", text="📦 Uncategorized", open=True)
+                parent = uncategorized_node
+            
+            self.grammar_tree.insert(parent, "end", iid=f"gram_{e['id']}", text=f"📒 {e['title']}")
+
+    def _on_grammar_coll_selected(self, event):
+        """Handle selection in grammar folder tree."""
+        # This method is no longer directly used for filtering, as _update_grammar_view handles the tree population.
+        # However, it might be useful for future folder-specific actions.
+        selection = self.grammar_tree.selection()
+        if selection:
+            res = selection[0]
+            if res.startswith("coll_"):
+                self.current_grammar_coll_id = int(res.split("_")[1])
+            else:
+                self.current_grammar_coll_id = res # "uncategorized" or "all" if we had those nodes
+            # self._update_grammar_view() # No need to re-filter the view based on collection selection, the tree shows all.
+                                        # This method might be repurposed for folder actions later.
             
     def _filter_grammar_entries(self, *args):
         """Filter entries based on search."""
-        self._load_grammar_entries()
+        self._update_grammar_view()
         
     def _on_grammar_entry_selected(self, event):
-        """Handle selection of a grammar entry."""
-        selection = self.grammar_listbox.curselection()
-        if not selection:
-            return
+        """Handle grammar entry selection from treeview."""
+        selection = self.grammar_tree.selection()
+        if not selection: return
+        
+        iid = selection[0]
+        if not iid.startswith("gram_"): return
             
-        index = selection[0]
-        entry = self.grammar_entries[index]
+        gram_id = int(iid.split("_")[1])
+        entry = next((e for e in self.grammar_entries if e['id'] == gram_id), None)
+        if not entry: return
+        
         self.current_grammar_id = entry['id']
         
+        # Update editor fields
         self.grammar_title_var.set(entry['title'])
         self.grammar_tags_var.set(entry['tags'] or "")
+        
         self.grammar_content_text.delete(1.0, tk.END)
         self.grammar_content_text.insert(tk.END, entry['content'])
+        
+        # Set status
+        from datetime import datetime
+        updated = datetime.fromisoformat(entry['updated_at']).strftime("%Y-%m-%d %H:%M")
+        self.current_status_label.config(text=f"Last updated: {updated}")
         
     def _new_grammar_entry(self):
         """Clear editor for new entry."""
@@ -1151,7 +1283,8 @@ Study Languages:
         self.grammar_title_var.set("")
         self.grammar_tags_var.set("")
         self.grammar_content_text.delete(1.0, tk.END)
-        self.grammar_listbox.selection_clear(0, tk.END)
+        self.grammar_tree.selection_remove(self.grammar_tree.selection()) # Clear treeview selection
+        self.current_status_label.config(text="") # Clear status
         
     def _save_grammar_entry(self):
         """Save the current grammar entry."""
@@ -1364,6 +1497,116 @@ Study Languages:
             self._check_queue_status()
         else:
             messagebox.showinfo("Batch Process", "No sentences found missing explanations.")
+
+    # ========== STUDY COLLECTIONS MANAGEMENT ==========
+    
+    def _manage_study_colls(self, type_name):
+        """Show dialog to manage folders for words/sentences/grammar."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Manage {type_name.capitalize()} Folders")
+        dialog.geometry("400x400")
+        ttk.Label(dialog, text="Create New Folder:", font=("Arial", 10, "bold")).pack(pady=5)
+        name_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=name_var, width=30).pack(pady=5)
+        ttk.Label(dialog, text="Parent Folder (Optional):").pack(pady=5)
+        colls = self.db.get_collections(type_name)
+        options = ["None"] + [c['name'] for c in colls]
+        coll_map = {c['name']: c['id'] for c in colls}
+        parent_var = tk.StringVar(value="None")
+        parent_combo = ttk.Combobox(dialog, textvariable=parent_var, values=options, state="readonly")
+        parent_combo.pack(pady=5)
+        
+        def add_coll():
+            name = name_var.get().strip()
+            if name:
+                parent_name = parent_var.get()
+                p_id = coll_map.get(parent_name)
+                self.db.create_collection(name, type_name, p_id)
+                refresh_map = {'word': self._update_words_view, 'sentence': self._update_sentences_view, 'grammar': self._update_grammar_view}
+                if type_name in refresh_map: refresh_map[type_name]()
+                messagebox.showinfo("Success", "Folder created!")
+                dialog.destroy()
+        ttk.Button(dialog, text="Create", command=add_coll).pack(pady=10)
+        ttk.Separator(dialog, orient="horizontal").pack(fill="x", pady=10)
+        ttk.Label(dialog, text="Existing Folders:", font=("Arial", 10, "bold")).pack(pady=5)
+        list_frame = ttk.Frame(dialog)
+        list_frame.pack(fill="both", expand=True, padx=20)
+        lb = tk.Listbox(list_frame)
+        lb.pack(side="left", fill="both", expand=True)
+        for c in colls: lb.insert("end", f"{c['name']} (ID: {c['id']})")
+        def delete_coll():
+            sel = lb.curselection()
+            if sel:
+                item = lb.get(sel[0]); cid = int(item.split("ID: ")[1].rstrip(")"))
+                if messagebox.askyesno("Confirm", "Delete folder?"):
+                    self.db.delete_collection(cid)
+                    refresh_map = {'word': self._update_words_view, 'sentence': self._update_sentences_view, 'grammar': self._update_grammar_view}
+                    if type_name in refresh_map: refresh_map[type_name]()
+                    dialog.destroy()
+        ttk.Button(dialog, text="Delete Selected", command=delete_coll).pack(pady=10)
+
+    def _move_item_to_coll(self, type_name):
+        """Move selected item to a folder."""
+        item_id = None
+        tree = getattr(self, f"{type_name}s_tree" if type_name != 'grammar' else "grammar_tree", None)
+        if not tree: return
+        
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Warning", f"Please select a {type_name} first")
+            return
+            
+        iid = sel[0]
+        prefix = "word_" if type_name == 'word' else "sent_" if type_name == 'sentence' else "gram_"
+        if not iid.startswith(prefix):
+            messagebox.showwarning("Warning", "Please select an item, not a folder")
+            return
+        item_id = int(iid.split("_")[1])
+            
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Move to Folder")
+        dialog.geometry("300x150")
+        ttk.Label(dialog, text="Select Folder:").pack(pady=10)
+        colls = self.db.get_collections(type_name)
+        options = ["None (Uncategorized)"] + [c['name'] for c in colls]
+        coll_map = {c['name']: c['id'] for c in colls}
+        sel_var = tk.StringVar(value=options[0])
+        combo = ttk.Combobox(dialog, textvariable=sel_var, values=options, state="readonly")
+        combo.pack(pady=5)
+        
+        def save_move():
+            coll_name = sel_var.get()
+            coll_id = coll_map.get(coll_name)
+            self.db.assign_to_collection(type_name, item_id, coll_id)
+            refresh_map = {'word': self._update_words_view, 'sentence': self._update_sentences_view, 'grammar': self._update_grammar_view}
+            if type_name in refresh_map: refresh_map[type_name]()
+            messagebox.showinfo("Success", "Item moved!")
+            dialog.destroy()
+        ttk.Button(dialog, text="Move", command=save_move).pack(pady=10)
+
+    def _export_study_items(self, item_type):
+        """Export study items to JSON."""
+        # Sanitize filename components
+        timestamp = datetime.now().strftime('%Y%m%d')
+        safe_type = re.sub(r'[\\/*?Internal:".<>|]', "", item_type)
+        
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json")],
+            initialfile=f"{safe_type}s_backup_{timestamp}.json",
+            title=f"Export {item_type.capitalize()}s to JSON"
+        )
+        
+        if file_path:
+            try:
+                if self.io_manager.export_study_items_to_json(item_type, file_path):
+                    messagebox.showinfo("Success", f"All {item_type}s exported successfully!")
+                else:
+                    messagebox.showerror("Error", f"Failed to export {item_type}s.")
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
     def clear_window(self):
         """Clear all widgets from the window."""

@@ -6,7 +6,7 @@ Here are the ones I am currently strongly considering:
 4. The ability to edit flashcards after they are created without recreating them (done)
 5. Batch processing for word explanations (done)
 6. Sort and filter options for words and phrases (done)
-7. I might need some universal vocabulary tracker that tracks the words (question) in the flashcards so the user can know if they want to add the words suggested by the model/words they are inputting or know if they already have them in their flashcards 
+7. I might need some universal vocabulary tracker that tracks the words (question) in the flashcards so the user can know if they want to add the words suggested by the model/words they are inputting or know if they already have them in their flashcards (done)
 8. I might try to add quiz features
 9. example sentence generation based on grammar patterns (after grammar book is added)
 10. Perhaps I can even give the LLMs tool use and allow them to look up what one should know for specific exams for various languages could be

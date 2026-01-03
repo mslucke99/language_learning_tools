@@ -330,8 +330,8 @@ class StudyManager:
         """Get all imported words with their definition status."""
         cursor = self.db.conn.cursor()
         cursor.execute("""
-            SELECT ic.id, ic.content, ic.url, ic.title, ic.created_at, ic.language,
-                   COUNT(wd.id) as has_definition
+            SELECT ic.id, ic.content, ic.url, ic.title, ic.created_at, ic.language, 
+                   COUNT(wd.id) as has_definition, ic.collection_id
             FROM imported_content ic
             LEFT JOIN word_definitions wd ON ic.id = wd.imported_content_id
             WHERE ic.content_type = 'word'
@@ -348,7 +348,8 @@ class StudyManager:
                 'title': row[3],
                 'created_at': row[4],
                 'language': row[5] or self.study_language,
-                'has_definition': row[6] > 0
+                'has_definition': row[6] > 0,
+                'collection_id': row[7]
             })
         return words
     
@@ -357,7 +358,7 @@ class StudyManager:
         cursor = self.db.conn.cursor()
         cursor.execute("""
             SELECT ic.id, ic.content, ic.url, ic.title, ic.created_at, ic.language,
-                   COUNT(se.id) as has_explanation
+                   COUNT(se.id) as has_explanation, ic.collection_id
             FROM imported_content ic
             LEFT JOIN sentence_explanations se ON ic.id = se.imported_content_id
             WHERE ic.content_type = 'sentence'
@@ -374,7 +375,8 @@ class StudyManager:
                 'title': row[3],
                 'created_at': row[4],
                 'language': row[5] or self.study_language,
-                'has_explanation': row[6] > 0
+                'has_explanation': row[6] > 0,
+                'collection_id': row[7]
             })
         return sentences
     
