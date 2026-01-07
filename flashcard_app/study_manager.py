@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 from database import FlashcardDatabase
 from ollama_integration import OllamaClient, OllamaThreadedQuery
-from prompts import WORD_PROMPTS, SENTENCE_PROMPTS
+from prompts import WORD_PROMPTS, SENTENCE_PROMPTS, WRITING_PROMPTS, CHAT_PROMPTS
 
 
 class StudyManager:
@@ -126,6 +126,12 @@ class StudyManager:
                     success, result, suggestions = self.generate_sentence_explanation(item_id, **kwargs)
                 elif task_type == 'grammar_explanation':
                     success, result, suggestions = self.generate_grammar_entry_content(item_id)
+                elif task_type == 'grade_writing':
+                    success, result, suggestions = self.grade_writing(kwargs.get('user_writing'), kwargs.get('topic'))
+                elif task_type == 'writing_topic':
+                    success, result, suggestions = self.generate_writing_topic()
+                elif task_type == 'chat_message':
+                    success, result, suggestions = self.send_chat_message(**kwargs)
                 else:
                     success, result, suggestions = False, "Unknown task type", {}
                 
@@ -1129,3 +1135,174 @@ Any important exceptions or nuances.
             'sentences_with_explanations': sentences_with_explanations,
             'sentences_percentage': (sentences_with_explanations / total_sentences * 100) if total_sentences > 0 else 0
         }
+    # ========== WRITING COMPOSITION LAB ==========
+
+    def generate_writing_topic(self) -> Tuple[bool, str, Dict]:
+        """Generate a creative writing topic using AI."""
+        if not self.ollama_client or not self.ollama_client.is_available():
+            return False, "Ollama is not available", {}
+            
+        prompt_template = WRITING_PROMPTS['generate_topic']['template']
+        prompt = prompt_template.format(
+            study_language=self.study_language,
+            native_language=self.native_language
+        )
+        
+        try:
+            content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            if content:
+                return True, content, {}
+            return False, "Failed to generate topic", {}
+        except Exception as e:
+            return False, f"Error: {e}", {}
+
+    def grade_writing(self, user_writing: str, topic: str) -> Tuple[bool, str, Dict]:
+        """Grade a user's writing composition and provide feedback."""
+        if not self.ollama_client or not self.ollama_client.is_available():
+            return False, "Ollama is not available", {}
+            
+        prompt_template = WRITING_PROMPTS['grade']['template']
+        prompt = prompt_template.format(
+            study_language=self.study_language,
+            topic=topic,
+            user_writing=user_writing,
+            native_language=self.native_language
+        )
+        
+        try:
+            content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            if content:
+                clean_content, suggestions = self._parse_ai_response(content)
+                
+                # Save to history
+                # We'll extract a "grade" from the clean_content if possible, 
+                # or just use a placeholder for now.
+                # A simple way to get grade is to look for "Overall Grade:"
+                grade_match = re.search(r'Overall Grade:\s*(.*?)(?:\n|$)', clean_content, re.IGNORECASE)
+                grade = grade_match.group(1).strip() if grade_match else "N/A"
+                
+                self.db.add_writing_session(topic, user_writing, clean_content, grade, self.study_language)
+                
+                return True, clean_content, suggestions
+            return False, "Failed to grade writing", {}
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return False, f"Error: {e}", {}
+
+    def get_writing_history(self) -> List[Dict]:
+        """Get the history of writing sessions."""
+        return self.db.get_writing_sessions(self.study_language)
+
+    # ========== INTERACTIVE CHAT ==========
+
+    def create_chat_session(self, topic: str) -> int:
+        """Create a new chat session."""
+        return self.db.create_chat_session(topic, self.study_language)
+
+    def get_chat_sessions(self) -> List[Dict]:
+        """Get list of chat sessions."""
+        return self.db.get_chat_sessions(self.study_language)
+
+    def get_chat_messages(self, session_id: int) -> List[Dict]:
+        """Get all messages for a session."""
+        return self.db.get_chat_messages(session_id)
+
+    def send_chat_message(self, session_id: int, user_message: str, current_history: List[Dict]) -> Tuple[bool, Dict, Dict]:
+        """
+        Send a message to the AI and process the response.
+        
+        Args:
+            session_id: The active session
+            user_message: The user's input
+            current_history: Recent messages (for context window)
+            
+        Returns:
+            Tuple(success, result_dict, suggestions_dict)
+        """
+        if not self.ollama_client or not self.ollama_client.is_available():
+            return False, {"error": "Ollama is not available"}, {}
+
+        # 1. Save User Message
+        self.db.add_chat_message(session_id, 'user', user_message)
+        
+        # 2. Build Prompt
+        # Get context (last 10 messages)
+        # Note: In a real app we'd construct a proper conversation history for the LLM API
+        # but for now we'll append to the system prompt
+        
+        session = next((s for s in self.get_chat_sessions() if s['id'] == session_id), None)
+        topic = session['cur_topic'] if session else "General Conversation"
+        
+        prompt_template = CHAT_PROMPTS['system_roleplay']['template']
+        system_prompt = prompt_template.format(
+            persona="Language Tutor",
+            study_language=self.study_language,
+            native_language=self.native_language,
+            topic=topic
+        )
+        
+        # Construct full prompt with history
+        full_prompt = f"System: {system_prompt}\n\n Conversation History:\n"
+        for msg in current_history[-6:]: # Include last 6 messages for context
+            full_prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
+        
+        full_prompt += f"User: {user_message}\nAssistant:"
+        
+        # 3. Generate Request
+        try:
+            content = self.ollama_client.generate_response(full_prompt, timeout=self.request_timeout)
+            if content:
+                # 4. Parse Response (XML)
+                parsed_data, suggestions = self._parse_chat_response(content)
+                
+                # 5. Save Assistant Message
+                # We save the 'reply' as content, and the full JSON as analysis
+                import json
+                analysis_json = json.dumps(parsed_data)
+                self.db.add_chat_message(session_id, 'assistant', parsed_data['reply'], analysis_json)
+                
+                return True, parsed_data, suggestions
+            return False, {"error": "Failed to generate response"}, {}
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return False, {"error": f"Error: {e}"}, {}
+
+    def _parse_chat_response(self, text: str) -> Tuple[Dict, Dict]:
+        """Parse structured chat response."""
+        
+        # Helpers to extract tag content
+        def extract_tag(tag, source):
+            pattern = f"<{tag}>(.*?)</{tag}>"
+            match = re.search(pattern, source, re.DOTALL | re.IGNORECASE)
+            return match.group(1).strip() if match else ""
+        
+        reply = extract_tag('reply', text)
+        feedback = extract_tag('feedback', text)
+        vocab_section = extract_tag('vocab', text)
+        grammar_section = extract_tag('grammar', text)
+        
+        # Fallback if XML fails (LLM forgot format)
+        if not reply:
+            reply = text # Assume whole text is reply
+        
+        # Extract structured items from vocab/grammar sections
+        parsed_suggestions = {
+            'flashcards': [],
+            'grammar': []
+        }
+        
+        # Re-use existing suggestion parser on the specific sections
+        _, vocab_suggs = self._parse_ai_response(vocab_section)
+        parsed_suggestions['flashcards'].extend(vocab_suggs['flashcards'])
+        
+        _, gram_suggs = self._parse_ai_response(grammar_section)
+        parsed_suggestions['grammar'].extend(gram_suggs['grammar'])
+        
+        return {
+            'reply': reply,
+            'feedback': feedback,
+            'vocab_section': vocab_section,
+            'grammar_section': grammar_section
+        }, parsed_suggestions

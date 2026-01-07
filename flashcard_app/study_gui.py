@@ -10,6 +10,7 @@ from database import FlashcardDatabase
 from ollama_integration import is_ollama_available
 from datetime import datetime
 import re
+from quiz_manager import QuizManager
 
 
 class StudyGUI:
@@ -22,6 +23,8 @@ class StudyGUI:
         self.study_manager = study_manager
         self.io_manager = io_manager
         self.ollama_available = is_ollama_available()
+        timeout = study_manager.request_timeout if study_manager else 30
+        self.quiz_manager = QuizManager(db, study_manager.ollama_client if study_manager else None, timeout=timeout)
         
         # Setup styles
         self.style = ttk.Style()
@@ -54,7 +57,8 @@ class StudyGUI:
         
         # Check for completed tasks that affect current view
         completed_tasks = []
-        for task_id, info in self.active_tasks.items():
+        for task_id in list(self.active_tasks.keys()):
+            info = self.active_tasks[task_id]
             task_status = self.study_manager.get_task_status(task_id)
             if task_status['status'] in ['completed', 'failed']:
                 completed_tasks.append(task_id)
@@ -206,6 +210,33 @@ Study Languages:
             style="Large.TButton"
         )
         grammar_btn.pack(side="left", padx=10, fill="both", expand=True)
+
+        # Writing Composition Lab button
+        writing_btn = ttk.Button(
+            btn_frame,
+            text="✍️ Writing Lab",
+            command=self.show_writing_lab_view,
+            style="Large.TButton"
+        )
+        writing_btn.pack(side="left", padx=10, fill="both", expand=True)
+
+        # Chat with AI button
+        chat_btn = ttk.Button(
+            btn_frame,
+            text="💬 Chat with AI",
+            command=self.show_chat_dashboard,
+            style="Large.TButton"
+        )
+        chat_btn.pack(side="left", padx=10, fill="both", expand=True)
+        
+        # Quiz button
+        quiz_btn = ttk.Button(
+            btn_frame,
+            text="📝 Quiz Yourself",
+            command=self.show_quiz_setup,
+            style="Large.TButton"
+        )
+        quiz_btn.pack(side="left", padx=10, fill="both", expand=True)
         
         # Back button
         back_btn = ttk.Button(frame, text="← Back to Main Menu", command=self.on_close)
@@ -1608,11 +1639,640 @@ Study Languages:
                 traceback.print_exc()
                 messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
+    # ========== WRITING COMPOSITION LAB UI ==========
+
+    def show_writing_lab_view(self):
+        """Show the Writing Composition Lab view."""
+        self.clear_window()
+        
+        frame = ttk.Frame(self.root, padding=20)
+        frame.pack(fill="both", expand=True)
+        
+        # Header
+        self._setup_standard_header(frame, "✍️ Writing Composition Lab", back_cmd=self.show_study_center)
+        
+        # Split view: Input (Top/Left) and Feedback (Bottom/Right)
+        paned = tk.PanedWindow(frame, orient="vertical", sashrelief="raised", sashwidth=4)
+        paned.pack(fill="both", expand=True, pady=10)
+        
+        # --- INPUT SECTION ---
+        input_frame = ttk.Frame(paned)
+        paned.add(input_frame, height=350)
+        
+        # Topic selection
+        topic_header = ttk.Frame(input_frame)
+        topic_header.pack(fill="x", pady=(0, 5))
+        ttk.Label(topic_header, text="Topic & Background:", font=("Segoe UI", 12, "bold")).pack(side="left")
+        
+        topic_btn_frame = ttk.Frame(topic_header)
+        topic_btn_frame.pack(side="right")
+        ttk.Button(topic_btn_frame, text="🎲 AI Generate Topic", command=self._generate_writing_topic).pack(side="left", padx=5)
+        
+        self.topic_text = tk.Text(input_frame, height=4, font=("Segoe UI", 10), wrap="word")
+        self.topic_text.pack(fill="x", pady=5)
+        self.topic_text.insert("1.0", "Type your own topic here, or click 'AI Generate Topic'...")
+        
+        # Writing area
+        ttk.Label(input_frame, text="Your Composition:", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(10, 5))
+        self.writing_text = tk.Text(input_frame, font=("Segoe UI", 11), wrap="word", undo=True)
+        self.writing_text.pack(fill="both", expand=True, pady=5)
+        
+        # Action buttons
+        btn_frame = ttk.Frame(input_frame)
+        btn_frame.pack(fill="x", pady=10)
+        
+        self.grade_btn = ttk.Button(btn_frame, text="🏆 Grade & Get Feedback", command=self._grade_writing, style="Accent.TButton")
+        self.grade_btn.pack(side="right", padx=5)
+        
+        # --- FEEDBACK SECTION ---
+        self.feedback_frame = ttk.Frame(paned)
+        paned.add(self.feedback_frame)
+        
+        ttk.Label(self.feedback_frame, text="Feedback & Suggestions:", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 5))
+        
+        self.feedback_display = scrolledtext.ScrolledText(self.feedback_frame, font=("Segoe UI", 10), wrap="word", state="disabled")
+        self.feedback_display.pack(fill="both", expand=True, pady=5)
+        
+        # Suggestions bar (for adding to study lists)
+        self.sugg_bar = ttk.Frame(self.feedback_frame)
+        self.sugg_bar.pack(fill="x", pady=5)
+        self.sugg_label = ttk.Label(self.sugg_bar, text="AI Suggestions: None", font=("Segoe UI", 9, "italic"))
+        self.sugg_label.pack(side="left")
+
+    def _generate_writing_topic(self):
+        """Request a topic from AI."""
+        self.topic_text.delete("1.0", "end")
+        self.topic_text.insert("1.0", "Generating topic... please wait.")
+        task_id = self.io_manager.study_manager.queue_generation_task('writing_topic', 0)
+        self._check_writing_task(task_id, "topic")
+
+    def _grade_writing(self):
+        """Analyze and grade the user's writing."""
+        topic = self.topic_text.get("1.0", "end").strip()
+        writing = self.writing_text.get("1.0", "end").strip()
+        
+        if not writing or len(writing) < 10:
+            messagebox.showwarning("Incomplete", "Please write a bit more before grading!")
+            return
+            
+        self.feedback_display.configure(state="normal")
+        self.feedback_display.delete("1.0", "end")
+        self.feedback_display.insert("1.0", "Analyzing your writing... this may take a moment.")
+        self.feedback_display.configure(state="disabled")
+        self.grade_btn.configure(state="disabled")
+        
+        task_id = self.io_manager.study_manager.queue_generation_task('grade_writing', 0, user_writing=writing, topic=topic)
+        self._check_writing_task(task_id, "grade")
+
+    def _check_writing_task(self, task_id, task_type):
+        """Poll for task completion."""
+        status = self.io_manager.study_manager.get_task_status(task_id)
+        if status['status'] == 'completed':
+            if task_type == "topic":
+                self.topic_text.delete("1.0", "end")
+                self.topic_text.insert("1.0", status['result'])
+            else:
+                self._display_writing_feedback(status['result'], status.get('suggestions', {}))
+                self.grade_btn.configure(state="normal")
+        elif status['status'] == 'failed':
+            error_msg = status.get('error', 'Unknown error')
+            if task_type == "topic":
+                self.topic_text.delete("1.0", "end")
+                self.topic_text.insert("1.0", f"Error generating topic: {error_msg}")
+            else:
+                self.feedback_display.configure(state="normal")
+                self.feedback_display.delete("1.0", "end")
+                self.feedback_display.insert("1.0", f"Error grading writing: {error_msg}")
+                self.feedback_display.configure(state="disabled")
+                self.grade_btn.configure(state="normal")
+        else:
+            self.root.after(1000, lambda: self._check_writing_task(task_id, task_type))
+
+    def _display_writing_feedback(self, feedback, suggestions):
+        """Update the UI with results and suggestions."""
+        self.feedback_display.configure(state="normal")
+        self.feedback_display.delete("1.0", "end")
+        self.feedback_display.insert("1.0", feedback)
+        self.feedback_display.configure(state="disabled")
+        
+        # Clear suggestion buttons
+        for widget in self.sugg_bar.winfo_children():
+            widget.destroy()
+            
+        fc_count = len(suggestions.get('flashcards', []))
+        gram_count = len(suggestions.get('grammar', []))
+        
+        if fc_count > 0 or gram_count > 0:
+            msg = f"Suggestions: {fc_count} Words, {gram_count} Grammar Patterns"
+            ttk.Label(self.sugg_bar, text=msg, font=("Segoe UI", 9, "bold")).pack(side="left", padx=5)
+            
+            if fc_count > 0:
+                ttk.Button(self.sugg_bar, text="➕ Add Words", 
+                           command=lambda: self._add_suggestions(suggestions, 'word'),
+                           style="Small.TButton").pack(side="left", padx=2)
+            if gram_count > 0:
+                ttk.Button(self.sugg_bar, text="➕ Add Grammar", 
+                           command=lambda: self._add_suggestions(suggestions, 'grammar'),
+                           style="Small.TButton").pack(side="left", padx=2)
+        else:
+            ttk.Label(self.sugg_bar, text="Suggestions: None found.", font=("Segoe UI", 9, "italic")).pack(side="left")
+
+    def _add_suggestions(self, suggestions, type_name):
+        """Batch add suggestions to the database."""
+        db = self.io_manager.study_manager.db
+        count = 0
+        if type_name == 'word':
+            for item in suggestions.get('flashcards', []):
+                # We need to add to imported_content first, then definition
+                content_id = db.add_imported_content(
+                    'word', item['word'], url="Writing Lab Suggestion",
+                    title="AI Suggestion", language=self.io_manager.study_manager.study_language
+                )
+                self.io_manager.study_manager.add_word_definition(
+                    content_id, item['definition'], 
+                    definition_language=self.io_manager.study_manager.native_language
+                )
+                count += 1
+            messagebox.showinfo("Success", f"Added {count} words to your study list!")
+        else:
+            for item in suggestions.get('grammar', []):
+                db.add_grammar_entry(
+                    item['title'], item['explanation'], 
+                    language=self.io_manager.study_manager.study_language
+                )
+                count += 1
+            messagebox.showinfo("Success", f"Added {count} grammar patterns to your Grammar Book!")
+
+    # ========== INTERACTIVE CHAT UI ==========
+
+    def show_chat_dashboard(self):
+        """Show the Chat Dashboard (Session List)."""
+        self.clear_window()
+        frame = ttk.Frame(self.root, padding=20)
+        frame.pack(fill="both", expand=True)
+        
+        self._setup_standard_header(frame, "💬 Interactive Chat", back_cmd=self.show_study_center)
+        
+        # New Chat Controls
+        ctrl_frame = ttk.Frame(frame)
+        ctrl_frame.pack(fill="x", pady=10)
+        
+        ttk.Label(ctrl_frame, text="Start New Conversation:", font=("Segoe UI", 11)).pack(side="left")
+        self.topic_entry = ttk.Entry(ctrl_frame, width=40)
+        self.topic_entry.pack(side="left", padx=5)
+        self.topic_entry.insert(0, "Ordering at a Cafe")
+        
+        ttk.Button(ctrl_frame, text="Start Chat", command=self._start_new_chat).pack(side="left")
+        
+        # Session List
+        ttk.Label(frame, text="Recent Conversations:", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(20, 5))
+        
+        # Scrollable list
+        list_frame = ttk.Frame(frame)
+        list_frame.pack(fill="both", expand=True)
+        
+        canvas = tk.Canvas(list_frame)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        sessions = self.io_manager.study_manager.get_chat_sessions()
+        if not sessions:
+            ttk.Label(scrollable_frame, text="No history yet. Start a new chat above!").pack(pady=20)
+        
+        for session in sessions:
+            s_frame = ttk.Frame(scrollable_frame, relief="solid", borderwidth=1)
+            s_frame.pack(fill="x", pady=5, padx=5)
+            
+            # Info
+            info = f"{session['cur_topic']} ({session['study_language']})"
+            date = session['last_updated'].split('T')[0]
+            
+            ttk.Label(s_frame, text=info, font=("Segoe UI", 11, "bold")).pack(side="left", padx=10, pady=10)
+            ttk.Label(s_frame, text=date, font=("Segoe UI", 9)).pack(side="left", padx=10)
+            
+            # Actions
+            ttk.Button(s_frame, text="Continue", command=lambda s=session: self._open_chat_session(s['id'])).pack(side="right", padx=5)
+            # Delete button could go here
+            
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+    def _start_new_chat(self):
+        """Create a session and open it."""
+        topic = self.topic_entry.get().strip()
+        if not topic:
+            return
+        session_id = self.io_manager.study_manager.create_chat_session(topic)
+        self._open_chat_session(session_id)
+        
+    def _open_chat_session(self, session_id):
+        """Open the Active Chat View."""
+        self.active_session_id = session_id
+        self.show_active_chat_view()
+        
+    def show_active_chat_view(self):
+        """Display the active chat interface."""
+        self.clear_window()
+        frame = ttk.Frame(self.root, padding=10)
+        frame.pack(fill="both", expand=True)
+        
+        # Header
+        session_info = next((s for s in self.io_manager.study_manager.get_chat_sessions() if s['id'] == self.active_session_id), None)
+        title = f"💬 Chat: {session_info['cur_topic']}" if session_info else "Chat"
+        self._setup_standard_header(frame, title, back_cmd=self.show_chat_dashboard)
+        
+        # Main Split: Chat (Left) vs Analysis Tabs (Right)
+        paned = tk.PanedWindow(frame, orient="horizontal", sashrelief="raised", sashwidth=4)
+        paned.pack(fill="both", expand=True, pady=5)
+        
+        # --- LEFT: CHAT AREA ---
+        chat_frame = ttk.Frame(paned, width=600)
+        paned.add(chat_frame)
+        
+        # Message History
+        self.chat_display = scrolledtext.ScrolledText(chat_frame, state="disabled", wrap="word", font=("Segoe UI", 11))
+        self.chat_display.pack(fill="both", expand=True, pady=(0, 10))
+        self.chat_display.tag_config("user", foreground="#007ACC", justify="right")
+        self.chat_display.tag_config("assistant", foreground="#2E7D32")
+        self.chat_display.tag_config("system", foreground="gray", font=("Segoe UI", 9, "italic"))
+        
+        # Input Area
+        input_frame = ttk.Frame(chat_frame)
+        input_frame.pack(fill="x")
+        
+        self.chat_input = ttk.Entry(input_frame, font=("Segoe UI", 11))
+        self.chat_input.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.chat_input.bind("<Return>", lambda e: self._send_message())
+        
+        self.send_btn = ttk.Button(input_frame, text="Send", command=self._send_message)
+        self.send_btn.pack(side="right")
+        
+        # --- RIGHT: ANALYSIS TABS ---
+        analysis_frame = ttk.Frame(paned, width=400)
+        paned.add(analysis_frame)
+        
+        self.analysis_notebook = ttk.Notebook(analysis_frame)
+        self.analysis_notebook.pack(fill="both", expand=True)
+        
+        # Tabs
+        self.feedback_tab = scrolledtext.ScrolledText(self.analysis_notebook, wrap="word", font=("Segoe UI", 10))
+        self.vocab_tab = scrolledtext.ScrolledText(self.analysis_notebook, wrap="word", font=("Segoe UI", 10))
+        self.grammar_tab = scrolledtext.ScrolledText(self.analysis_notebook, wrap="word", font=("Segoe UI", 10))
+        
+        self.analysis_notebook.add(self.feedback_tab, text="Feedback")
+        self.analysis_notebook.add(self.vocab_tab, text="Vocabulary")
+        self.analysis_notebook.add(self.grammar_tab, text="Grammar")
+        
+        # Initial Load
+        self._refresh_chat_history()
+        
+    def _refresh_chat_history(self):
+        """Load messages from DB and render."""
+        messages = self.io_manager.study_manager.get_chat_messages(self.active_session_id)
+        self.chat_display.configure(state="normal")
+        self.chat_display.delete("1.0", "end")
+        
+        for msg in messages:
+            role = msg['role']
+            content = msg['content']
+            
+            if role == "user":
+                self.chat_display.insert("end", f"You: {content}\n\n", "user")
+            else:
+                self.chat_display.insert("end", f"Tutor: {content}\n\n", "assistant")
+                
+            # Populate tabs with latest analysis (simple approach: show cumulative or latest)
+            # User requested History for feedback => we can append formatted feedback
+            if msg.get('analysis'):
+                try:
+                    import json
+                    analysis = json.loads(msg['analysis'])
+                    self._append_analysis(analysis)
+                except:
+                    pass
+                    
+        self.chat_display.see("end")
+        self.chat_display.configure(state="disabled")
+
+    def _append_analysis(self, analysis):
+        """Append analysis to tabs."""
+        # Feedback
+        if analysis.get('feedback'):
+            self.feedback_tab.insert("end", f"--- New Feedback ---\n{analysis['feedback']}\n\n")
+            self.feedback_tab.see("end")
+            
+        # Vocab (Parsing <flashcard> tags locally for display or using pre-parsed)
+        if analysis.get('vocab_section'):
+             self.vocab_tab.insert("end", f"{analysis['vocab_section']}\n\n")
+             self.vocab_tab.see("end")
+        
+        # Grammar
+        if analysis.get('grammar_section'):
+             self.grammar_tab.insert("end", f"{analysis['grammar_section']}\n\n")
+             self.grammar_tab.see("end")
+             
+    def _send_message(self):
+        """Send message to AI."""
+        msg = self.chat_input.get().strip()
+        if not msg: 
+            return
+            
+        self.chat_input.delete(0, "end")
+        self.chat_display.configure(state="normal")
+        self.chat_display.insert("end", f"You: {msg}\n\n", "user")
+        self.chat_display.insert("end", "Tutor is typing...\n\n", "system")
+        self.chat_display.configure(state="disabled")
+        self.chat_display.see("end")
+        
+        # Get history for context
+        current_msgs = self.io_manager.study_manager.get_chat_messages(self.active_session_id)
+        
+        # Queue task
+        task_id = self.io_manager.study_manager.queue_generation_task(
+            'chat_message', 
+            0, # Item ID irrelevant here
+            session_id=self.active_session_id,
+            user_message=msg,
+            current_history=current_msgs
+        )
+        self._check_chat_task(task_id)
+
+    def _check_chat_task(self, task_id):
+        """Poll for chat response."""
+        status = self.io_manager.study_manager.get_task_status(task_id)
+        if status['status'] == 'completed':
+            # Remove "Tutor is typing..."
+            self.chat_display.configure(state="normal")
+            # Hacky delete last line: start of system tag to end
+            # Better: just refresh full history
+            self._refresh_chat_history()
+            
+        elif status['status'] == 'failed':
+             self.chat_display.configure(state="normal")
+             self.chat_display.insert("end", f"Error: {status.get('error')}\n\n", "system")
+             self.chat_display.configure(state="disabled")
+        else:
+            self.root.after(500, lambda: self._check_chat_task(task_id))
+    
     def clear_window(self):
         """Clear all widgets from the window."""
         for widget in self.root.winfo_children():
             widget.destroy()
-    
+
+    # ========== QUIZ UI ==========
+
+    def show_quiz_setup(self):
+        """Show quiz setup dialog."""
+        self.clear_window()
+        frame = ttk.Frame(self.root, padding=20)
+        frame.pack(fill="both", expand=True)
+        
+        self._setup_standard_header(frame, "📝 Quiz Setup", back_cmd=self.show_study_center)
+        
+        # Source selection
+        ttk.Label(frame, text="Select Source:", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(10, 5))
+        
+        source_frame = ttk.Frame(frame)
+        source_frame.pack(fill="x", pady=5)
+        
+        self.quiz_source_type = tk.StringVar(value="deck")
+        ttk.Radiobutton(source_frame, text="Flashcard Deck", variable=self.quiz_source_type, value="deck").pack(side="left", padx=10)
+        ttk.Radiobutton(source_frame, text="Vocabulary Collection", variable=self.quiz_source_type, value="vocab").pack(side="left", padx=10)
+        ttk.Radiobutton(source_frame, text="Grammar Collection", variable=self.quiz_source_type, value="grammar").pack(side="left", padx=10)
+        
+        # Specific source dropdown
+        ttk.Label(frame, text="Choose specific item:", font=("Segoe UI", 11)).pack(anchor="w", pady=(15, 5))
+        self.quiz_source_combo = ttk.Combobox(frame, state="readonly", width=50)
+        self.quiz_source_combo.pack(fill="x", pady=5)
+        
+        # Update combo when radio changes
+        self.quiz_source_type.trace_add("write", lambda *args: self._update_quiz_sources())
+        self._update_quiz_sources()
+        
+        # Question count
+        ttk.Label(frame, text="Number of Questions:", font=("Segoe UI", 11)).pack(anchor="w", pady=(15, 5))
+        self.quiz_count_var = tk.IntVar(value=10)
+        count_frame = ttk.Frame(frame)
+        count_frame.pack(fill="x")
+        ttk.Scale(count_frame, from_=5, to=50, variable=self.quiz_count_var, orient="horizontal").pack(side="left", fill="x", expand=True)
+        ttk.Label(count_frame, textvariable=self.quiz_count_var, width=5).pack(side="right")
+        
+        # Difficulty
+        ttk.Label(frame, text="Difficulty:", font=("Segoe UI", 11)).pack(anchor="w", pady=(15, 5))
+        diff_frame = ttk.Frame(frame)
+        diff_frame.pack(fill="x", pady=5)
+        
+        self.quiz_difficulty = tk.StringVar(value="medium")
+        ttk.Radiobutton(diff_frame, text="Easy", variable=self.quiz_difficulty, value="easy").pack(side="left", padx=10)
+        ttk.Radiobutton(diff_frame, text="Medium", variable=self.quiz_difficulty, value="medium").pack(side="left", padx=10)
+        ttk.Radiobutton(diff_frame, text="Hard", variable=self.quiz_difficulty, value="hard").pack(side="left", padx=10)
+        
+        # Start button
+        ttk.Button(frame, text="Start Quiz", command=self._start_quiz, style="Accent.TButton").pack(pady=20)
+        
+    def _update_quiz_sources(self):
+        """Update source dropdown based on selection."""
+        source_type = self.quiz_source_type.get()
+        cursor = self.db.conn.cursor()
+        
+        if source_type == "deck":
+            cursor.execute("SELECT id, name FROM decks ORDER BY name")
+            items = [(f"{row[1]}", row[0]) for row in cursor.fetchall()]
+        elif source_type == "vocab":
+            cursor.execute("SELECT id, name FROM collections WHERE type = 'word' ORDER BY name")
+            items = [(row[0], row[1]) for row in cursor.fetchall()]
+        else:  # grammar
+            cursor.execute("SELECT id, name FROM collections WHERE type = 'grammar' ORDER BY name")
+            items = [(row[0], row[1]) for row in cursor.fetchall()]
+        
+        if not items:
+            items = [("No items available", -1)]
+            
+        self.quiz_source_combo['values'] = [item[0] for item in items]
+        self.quiz_source_ids = {item[0]: item[1] for item in items}
+        if items:
+            self.quiz_source_combo.current(0)
+            
+    def _start_quiz(self):
+        """Generate quiz and start."""
+        source_name = self.quiz_source_combo.get()
+        source_id = self.quiz_source_ids.get(source_name, -1)
+        
+        if source_id == -1:
+            messagebox.showwarning("No Source", "Please select a valid source.")
+            return
+            
+        source_type = self.quiz_source_type.get()
+        count = self.quiz_count_var.get()
+        difficulty = self.quiz_difficulty.get()
+        
+        # Generate quiz
+        session_id = self.quiz_manager.generate_quiz(source_type, source_id, count, difficulty)
+        
+        if session_id == -1:
+            messagebox.showerror("Error", "No items found to quiz on.")
+            return
+            
+        self.current_quiz_session = session_id
+        self.show_quiz_view()
+        
+    def show_quiz_view(self):
+        """Display quiz questions."""
+        self.clear_window()
+        frame = ttk.Frame(self.root, padding=20)
+        frame.pack(fill="both", expand=True)
+        
+        # Get questions
+        self.quiz_questions = self.quiz_manager.get_quiz_questions(self.current_quiz_session)
+        self.current_question_index = 0
+        
+        # Header
+        self._setup_standard_header(frame, "📝 Quiz", back_cmd=self.show_study_center)
+        
+        # Question counter
+        self.question_counter_label = ttk.Label(frame, text="", font=("Segoe UI", 11))
+        self.question_counter_label.pack(pady=10)
+        
+        # Question text
+        self.question_label = ttk.Label(frame, text="", font=("Segoe UI", 13, "bold"), wraplength=600)
+        self.question_label.pack(pady=20)
+        
+        # Answer choices
+        self.quiz_answer = tk.StringVar()
+        choices_frame = ttk.Frame(frame)
+        choices_frame.pack(fill="both", expand=True, pady=20)
+        
+        self.choice_buttons = {}
+        for letter in ['A', 'B', 'C', 'D']:
+            btn_frame = ttk.Frame(choices_frame)
+            btn_frame.pack(fill="x", pady=5)
+            
+            rb = ttk.Radiobutton(btn_frame, text="", variable=self.quiz_answer, value=letter)
+            rb.pack(side="left", padx=5)
+            self.choice_buttons[letter] = ttk.Label(btn_frame, text="", font=("Segoe UI", 11), wraplength=500)
+            self.choice_buttons[letter].pack(side="left", fill="x", expand=True)
+        
+        # Next button
+        self.next_button = ttk.Button(frame, text="Next", command=self._submit_quiz_answer, style="Accent.TButton")
+        self.next_button.pack(pady=20)
+        
+        # Load first question
+        self._load_quiz_question()
+        
+    def _load_quiz_question(self):
+        """Load current question into UI."""
+        if self.current_question_index >= len(self.quiz_questions):
+            return
+            
+        q = self.quiz_questions[self.current_question_index]
+        total = len(self.quiz_questions)
+        
+        self.question_counter_label.config(text=f"Question {self.current_question_index + 1} of {total}")
+        self.question_label.config(text=q['question_text'])
+        
+        # Load choices
+        for letter in ['A', 'B', 'C', 'D']:
+            choice_text = q[f'choice_{letter.lower()}']
+            self.choice_buttons[letter].config(text=choice_text)
+        
+        # Reset selection
+        self.quiz_answer.set("")
+        
+        # Update button text
+        if self.current_question_index == len(self.quiz_questions) - 1:
+            self.next_button.config(text="Finish")
+        else:
+            self.next_button.config(text="Next")
+            
+    def _submit_quiz_answer(self):
+        """Submit answer and move to next."""
+        answer = self.quiz_answer.get()
+        if not answer:
+            messagebox.showwarning("No Answer", "Please select an answer.")
+            return
+            
+        # Submit answer
+        q = self.quiz_questions[self.current_question_index]
+        self.quiz_manager.submit_answer(q['id'], answer)
+        
+        # Move to next
+        self.current_question_index += 1
+        
+        if self.current_question_index < len(self.quiz_questions):
+            self._load_quiz_question()
+        else:
+            # Quiz complete
+            self.show_quiz_results()
+            
+    def show_quiz_results(self):
+        """Show quiz results."""
+        self.clear_window()
+        frame = ttk.Frame(self.root, padding=20)
+        frame.pack(fill="both", expand=True)
+        
+        self._setup_standard_header(frame, "📝 Quiz Results", back_cmd=self.show_study_center)
+        
+        # Calculate score
+        results = self.quiz_manager.calculate_score(self.current_quiz_session)
+        
+        # Score display
+        score_frame = ttk.Frame(frame, relief="solid", borderwidth=2)
+        score_frame.pack(fill="x", pady=20, padx=50)
+        
+        ttk.Label(score_frame, text=f"Score: {results['score']}%", font=("Segoe UI", 24, "bold")).pack(pady=20)
+        ttk.Label(score_frame, text=f"{results['correct']} / {results['total']} correct", font=("Segoe UI", 14)).pack(pady=10)
+        
+        # Question review
+        ttk.Label(frame, text="Review:", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(20, 10))
+        
+        # Scrollable review
+        review_frame = ttk.Frame(frame)
+        review_frame.pack(fill="both", expand=True)
+        
+        canvas = tk.Canvas(review_frame)
+        scrollbar = ttk.Scrollbar(review_frame, orient="vertical", command=canvas.yview)
+        scrollable = ttk.Frame(canvas)
+        
+        scrollable.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Add questions
+        questions = self.quiz_manager.get_quiz_questions(self.current_quiz_session)
+        for i, q in enumerate(questions, 1):
+            q_frame = ttk.Frame(scrollable, relief="groove", borderwidth=1)
+            q_frame.pack(fill="x", pady=5, padx=5)
+            
+            # Status icon
+            icon = "✓" if q['is_correct'] else "✗"
+            color = "green" if q['is_correct'] else "red"
+            
+            ttk.Label(q_frame, text=f"{icon} Q{i}: {q['question_text']}", 
+                     foreground=color, font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+            
+            ttk.Label(q_frame, text=f"Your answer: {q['user_answer']} - {q[f'choice_{q['user_answer'].lower()}']}",
+                     font=("Segoe UI", 9)).pack(anchor="w", padx=20)
+            
+            if not q['is_correct']:
+                ttk.Label(q_frame, text=f"Correct answer: {q['correct_answer']} - {q[f'choice_{q['correct_answer'].lower()}']}",
+                         foreground="green", font=("Segoe UI", 9)).pack(anchor="w", padx=20, pady=2)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Action buttons
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(pady=20)
+        ttk.Button(btn_frame, text="Take Another Quiz", command=self.show_quiz_setup).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Return to Study Center", command=self.show_study_center).pack(side="left", padx=5)
+
     def on_close(self):
         """Return to main menu."""
         self.root.quit()
