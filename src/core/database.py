@@ -1,5 +1,5 @@
 import sqlite3
-from flashcard import Flashcard
+from src.features.flashcards.logic.flashcard import Flashcard
 from datetime import datetime
 from typing import Optional, List, Dict
 

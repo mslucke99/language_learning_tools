@@ -17,9 +17,9 @@ import time
 import re
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
-from database import FlashcardDatabase
-from ollama_integration import OllamaClient, OllamaThreadedQuery
-from prompts import WORD_PROMPTS, SENTENCE_PROMPTS, WRITING_PROMPTS, CHAT_PROMPTS
+from src.core.database import FlashcardDatabase
+from src.services.llm_service import OllamaClient, OllamaThreadedQuery
+from src.services.prompts import WORD_PROMPTS, SENTENCE_PROMPTS, WRITING_PROMPTS, CHAT_PROMPTS
 
 
 class StudyManager:

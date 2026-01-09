@@ -5,8 +5,8 @@ Quiz Manager - Handles quiz generation and scoring
 import random
 import json
 from typing import List, Dict, Tuple, Optional
-from database import FlashcardDatabase
-from ollama_integration import OllamaClient
+from src.core.database import FlashcardDatabase
+from src.services.llm_service import OllamaClient
 from datetime import datetime
 
 
