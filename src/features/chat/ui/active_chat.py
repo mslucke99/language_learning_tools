@@ -93,12 +93,80 @@ class ActiveChatFrame(ttk.Frame):
         if analysis.get('feedback'):
             self.feedback_tab.insert("end", f"--- New Feedback ---\n{analysis['feedback']}\n\n")
             self.feedback_tab.see("end")
-        if analysis.get('vocab_section'):
-             self.vocab_tab.insert("end", f"{analysis['vocab_section']}\n\n")
-             self.vocab_tab.see("end")
-        if analysis.get('grammar_section'):
-             self.grammar_tab.insert("end", f"{analysis['grammar_section']}\n\n")
-             self.grammar_tab.see("end")
+        if analysis.get('vocab_section') or (analysis.get('suggestions') and analysis['suggestions'].get('flashcards')):
+             self.vocab_tab.configure(state="normal")
+             self.vocab_tab.delete("1.0", "end")
+             
+             # Add buttons for structured suggestions
+             suggestions = analysis.get('suggestions', {})
+             flashcards = suggestions.get('flashcards', [])
+             
+             if flashcards:
+                 self.vocab_tab.insert("end", "--- Suggested Vocabulary ---\n")
+                 for item in flashcards:
+                     btn_text = f"➕ Add: {item['word']}"
+                     # Create a clickable tag/button equivalent
+                     # Tkinter Text widgets are tricky with buttons, so using tag_bind or window_create
+                     # Simpler approach: Insert text description, then a button
+                     self.vocab_tab.insert("end", f"• {item['word']}: {item['definition']}\n")
+                     btn = ttk.Button(self.vocab_tab, text="Add", width=4, 
+                                    command=lambda i=item: self._add_suggestion(i, 'word'))
+                     self.vocab_tab.window_create("end", window=btn)
+                     self.vocab_tab.insert("end", "\n\n")
+             
+             # Also show raw text if available, as fallback/context
+             if analysis.get('vocab_section'):
+                 self.vocab_tab.insert("end", "\n--- Full Analysis ---\n" + analysis['vocab_section'])
+             
+             self.vocab_tab.configure(state="disabled")
+             
+        if analysis.get('grammar_section') or (analysis.get('suggestions') and analysis['suggestions'].get('grammar')):
+             self.grammar_tab.configure(state="normal")
+             self.grammar_tab.delete("1.0", "end")
+             
+             suggestions = analysis.get('suggestions', {})
+             grammar = suggestions.get('grammar', [])
+             
+             if grammar:
+                 self.grammar_tab.insert("end", "--- Suggested Grammar ---\n")
+                 for item in grammar:
+                     self.grammar_tab.insert("end", f"• {item['title']}\n")
+                     btn = ttk.Button(self.grammar_tab, text="Add", width=4, 
+                                    command=lambda i=item: self._add_suggestion(i, 'grammar'))
+                     self.grammar_tab.window_create("end", window=btn)
+                     self.grammar_tab.insert("end", f"\n{item['explanation'][:100]}...\n\n")
+
+             if analysis.get('grammar_section'):
+                 self.grammar_tab.insert("end", "\n--- Full Analysis ---\n" + analysis['grammar_section'])
+                 
+             self.grammar_tab.configure(state="disabled")
+
+    def _add_suggestion(self, item, type_name):
+        try:
+            if type_name == 'word':
+                # Check duplicate
+                existing = self.study_manager.db.find_flashcard_by_question(item['word'])
+                if existing:
+                    if not messagebox.askyesno("Duplicate", f"Word '{item['word']}' exists. Add anyway?"):
+                        return
+
+                content_id = self.study_manager.db.add_imported_content(
+                    'word', item['word'], url="Chat Suggestion",
+                    title="Interactive Chat", language=self.study_manager.study_language
+                )
+                self.study_manager.add_word_definition(
+                    content_id, item['definition'], definition_language=self.study_manager.native_language
+                )
+                messagebox.showinfo("Saved", f"Added '{item['word']}'")
+                
+            elif type_name == 'grammar':
+                self.study_manager.db.add_grammar_entry(
+                    item['title'], item['explanation'], language=self.study_manager.study_language, tags="chat-generated"
+                )
+                messagebox.showinfo("Saved", f"Added '{item['title']}'")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to add: {e}")
 
     def _send_message(self):
         msg = self.chat_input.get().strip()

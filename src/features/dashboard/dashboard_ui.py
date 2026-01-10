@@ -22,6 +22,8 @@ from src.features.writing_lab.ui.writing_lab import WritingLabFrame
 from src.features.chat.ui.chat_dashboard import ChatDashboardFrame
 from src.features.chat.ui.active_chat import ActiveChatFrame
 from src.features.dashboard.settings_ui import SettingsFrame
+from src.features.dashboard.task_queue_ui import TaskQueueDialog
+from src.features.dashboard.dev_console_ui import DevConsoleDialog
 
 class DashboardApp:
     def __init__(self, root):
@@ -51,11 +53,17 @@ class DashboardApp:
         self.main_container = ttk.Frame(self.root)
         self.main_container.pack(fill="both", expand=True)
         
+        # Status Bar
+        self.setup_status_bar()
+        
         # Navigation State
         self.current_frame = None
         
         # Start with Home (Dashboard)
         self.show_home()
+        
+        # Start periodic updates
+        self._update_status_bar()
         
     def _preload_ollama(self):
         import threading
@@ -165,6 +173,52 @@ class DashboardApp:
         
     def show_grammar_help(self):
         self.show_grammar_book_view()
+
+    # --- Status Bar & Task Queue ---
+
+    def setup_status_bar(self):
+        self.status_bar = ttk.Frame(self.root, relief="sunken", padding=(10, 2))
+        self.status_bar.pack(side="bottom", fill="x")
+        
+        self.ollama_status_label = ttk.Label(self.status_bar, text="Ollama: Checking...")
+        self.ollama_status_label.pack(side="left", padx=5)
+        
+        ttk.Separator(self.status_bar, orient="vertical").pack(side="left", fill="y", padx=10)
+        
+        self.queue_status_label = ttk.Label(self.status_bar, text="AI Tasks: 0")
+        self.queue_status_label.pack(side="left", padx=5)
+        
+        self.task_mgr_btn = ttk.Button(self.status_bar, text="📋 Tasks", command=self.show_task_manager, width=10)
+        self.task_mgr_btn.pack(side="right", padx=5)
+
+        self.dev_btn = ttk.Button(self.status_bar, text="🚀 Dev", command=self.show_dev_console, width=8)
+        self.dev_btn.pack(side="right", padx=5)
+        
+    def _update_status_bar(self):
+        # Update Ollama Status
+        if self.ollama_available:
+            self.ollama_status_label.config(text=f"Ollama: Online ({self.study_manager.ollama_model or 'Default'})", foreground="green")
+        else:
+            self.ollama_status_label.config(text="Ollama: Offline", foreground="red")
+            
+        # Update Queue Status
+        q_status = self.study_manager.get_queue_status()
+        total_active = q_status['queued'] + q_status['active']
+        if total_active > 0:
+            self.queue_status_label.config(text=f"AI Tasks: {total_active} pending", font=("Segoe UI", 9, "bold"))
+            self.task_mgr_btn.config(text=f"📋 Tasks ({total_active})")
+        else:
+            self.queue_status_label.config(text="AI Tasks: 0", font=("Segoe UI", 9))
+            self.task_mgr_btn.config(text="📋 Tasks")
+            
+        # Schedule next update (every 3 seconds)
+        self.root.after(3000, self._update_status_bar)
+
+    def show_task_manager(self):
+        TaskQueueDialog(self.root, self.study_manager)
+
+    def show_dev_console(self):
+        DevConsoleDialog(self.root, self.study_manager)
 
 class HomeDashboard(ttk.Frame):
     def __init__(self, parent, controller):

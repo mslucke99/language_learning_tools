@@ -107,13 +107,20 @@ class SentencesViewFrame(ttk.Frame):
         self.sentence_grammar_text = scrolledtext.ScrolledText(tab_grammar, font=("Arial", 10), wrap="word")
         self.sentence_grammar_text.pack(fill="both", expand=True)
         
-        # Tab 3: Personal Notes
+        # Tab 3: Related Items (Suggestions)
+        self.tab_suggestions = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(self.tab_suggestions, text="Related Items")
+        self.suggestions_frame = ttk.Frame(self.tab_suggestions)
+        self.suggestions_frame.pack(fill="both", expand=True)
+        ttk.Label(self.suggestions_frame, text="Use 'Explain' to generate suggested flashcards and grammar patterns.", font=("Arial", 9, "italic")).pack(pady=20)
+        
+        # Tab 4: Personal Notes
         tab_notes = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(tab_notes, text="Personal Notes")
         self.sentence_notes_text = scrolledtext.ScrolledText(tab_notes, font=("Arial", 10), wrap="word")
         self.sentence_notes_text.pack(fill="both", expand=True)
         
-        # Tab 4: Follow-up Chat
+        # Tab 5: Follow-up Chat
         tab_chat = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(tab_chat, text="Follow-up Chat")
         self.followup_history_text = scrolledtext.ScrolledText(tab_chat, font=("Arial", 10), wrap="word", state="disabled")
@@ -124,7 +131,7 @@ class SentencesViewFrame(ttk.Frame):
         self.followup_question_text.pack(fill="x", side="left", expand=True, padx=(0, 5))
         ttk.Button(input_frame, text="Ask", command=self._ask_followup_question).pack(side="right")
         
-        # Tab 5: Settings
+        # Tab 6: Settings
         tab_settings = ttk.Frame(self.notebook, padding="20")
         self.notebook.add(tab_settings, text="Settings")
         ttk.Label(tab_settings, text="Select Focus Areas:", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 10))
@@ -213,7 +220,13 @@ class SentencesViewFrame(ttk.Frame):
         self.sentence_grammar_text.delete(1.0, tk.END)
         self.sentence_notes_text.delete(1.0, tk.END)
         self.followup_question_text.delete(1.0, tk.END)
+        self.sentence_notes_text.delete(1.0, tk.END)
+        self.followup_question_text.delete(1.0, tk.END)
         self.current_sentence_explanation_id = None
+        
+        # Clear suggestions
+        for widget in self.suggestions_frame.winfo_children(): widget.destroy()
+        ttk.Label(self.suggestions_frame, text="Use 'Explain' to generate suggested flashcards and grammar patterns.", font=("Arial", 9, "italic")).pack(pady=20)
         
         if explanation:
             self.sentence_explanation_text.insert(tk.END, explanation['explanation'])
@@ -236,7 +249,11 @@ class SentencesViewFrame(ttk.Frame):
         if not selected_focus: selected_focus = ['all']
         
         self.sentence_explanation_text.delete(1.0, tk.END)
+        self.sentence_explanation_text.delete(1.0, tk.END)
         self.sentence_explanation_text.insert(tk.END, f"⏳ Task Queued: Generating explanations for {', '.join(selected_focus)}...")
+        
+        # Switch to explanation tab
+        self.notebook.select(0)
         
         task_id = self.study_manager.queue_generation_task(
             'sentence_explanation',
@@ -288,14 +305,22 @@ class SentencesViewFrame(ttk.Frame):
             if status['status'] in ['completed', 'failed']:
                  completed.append(task_id)
                  if status['status'] == 'completed' and self.active_tasks[task_id]['item_id'] == self.current_sentence_id:
+                      self.sentences_data = self.study_manager.get_imported_sentences()
+                      self._update_sentences_view()
                       self._on_sentence_selected(None)
+                      
+                      # Handle suggestions
+                      suggestions = status.get('suggestions', {})
+                      if suggestions:
+                          self._populate_suggestions(suggestions)
+                          
                       messagebox.showinfo("Complete", "Explanation ready!")
                  elif status['status'] == 'failed':
                       messagebox.showerror("Error", status.get("error"))
-                      
+                       
         for t in completed: del self.active_tasks[t]
         self.after(1000, self._check_queue_status)
-
+                      
     def _add_manual_sentence_dialog(self):
         dialog = tk.Toplevel(self)
         dialog.title("Add Sentence")
@@ -355,5 +380,72 @@ class SentencesViewFrame(ttk.Frame):
               self.followup_history_text.insert(tk.END, f"Q: {f['question']}\nA: {f['answer']}\n\n")
          self.followup_history_text.config(state="disabled")
          
+    def _populate_suggestions(self, suggestions):
+        for widget in self.suggestions_frame.winfo_children(): widget.destroy()
+        
+        # Check if empty
+        if not suggestions.get('flashcards') and not suggestions.get('grammar'):
+             ttk.Label(self.suggestions_frame, text="No specific suggestions found.", font=("Arial", 9, "italic")).pack(pady=20)
+             return
+             
+        # Add Flashcards
+        flashcards = suggestions.get('flashcards', [])
+        if flashcards:
+            ttk.Label(self.suggestions_frame, text="📚 Vocabulary Suggestions", font=("Arial", 10, "bold")).pack(anchor="w", pady=(10, 5))
+            for item in flashcards:
+                f = ttk.Frame(self.suggestions_frame)
+                f.pack(fill="x", pady=2)
+                ttk.Label(f, text=f"• {item['word']}", font=("Arial", 10, "bold")).pack(side="left")
+                ttk.Label(f, text=f": {item['definition']}", font=("Arial", 9)).pack(side="left", padx=5)
+                ttk.Button(f, text="Add", width=6, command=lambda i=item: self._add_suggestion(i, 'word')).pack(side="right")
+
+        # Add Grammar
+        grammar = suggestions.get('grammar', [])
+        if grammar:
+            ttk.Label(self.suggestions_frame, text="📖 Grammar Suggestions", font=("Arial", 10, "bold")).pack(anchor="w", pady=(20, 5))
+            for item in grammar:
+                f = ttk.Frame(self.suggestions_frame)
+                f.pack(fill="x", pady=2)
+                ttk.Label(f, text=f"• {item['title']}", font=("Arial", 10, "bold")).pack(side="left")
+                ttk.Button(f, text="Add", width=6, command=lambda i=item: self._add_suggestion(i, 'grammar')).pack(side="right")
+                ttk.Label(f, text=f"- {item['explanation'][:60]}...", font=("Arial", 9, "italic")).pack(side="left", padx=5)
+                
+        # Switch to suggestions tab to alert user
+        self.notebook.select(self.tab_suggestions)
+
+    def _add_suggestion(self, item, type_name):
+        try:
+            if type_name == 'word':
+                # Check for duplicate manually first (optional UI check)
+                existing = self.study_manager.db.find_flashcard_by_question(item['word'])
+                if existing:
+                    if not messagebox.askyesno("Duplicate", f"The word '{item['word']}' might already exist in deck '{existing[0]['deck_name']}'. Add anyway?"):
+                        return
+                
+                # Add content
+                content_id = self.study_manager.db.add_imported_content(
+                    'word', item['word'], 
+                    url="AI Suggestion", 
+                    title="Sentence Analysis", 
+                    language=self.study_manager.study_language
+                )
+                self.study_manager.add_word_definition(
+                    content_id, item['definition'], 
+                    definition_language=self.study_manager.native_language
+                )
+                messagebox.showinfo("Saved", f"Added '{item['word']}' to your collection.")
+                
+            elif type_name == 'grammar':
+                self.study_manager.db.add_grammar_entry(
+                    item['title'], 
+                    item['explanation'], 
+                    language=self.study_manager.study_language,
+                    tags="auto-generated"
+                )
+                messagebox.showinfo("Saved", f"Added grammar pattern '{item['title']}'.")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to add item: {e}")
+
     def _start_batch_sentences(self):
          pass

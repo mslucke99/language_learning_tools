@@ -1,0 +1,14 @@
+1. The writing lab doesn't have a button to allow the model to grade the writing.
+2. The writing lab doesn't have a history of the writing attempts.
+3. The writing lab doesn't have a way to save the writing attempts.
+4. The writing lab doesn't have a way to export the writing attempts.
+5. The writing lab has an interface insufficient to include a way to export the related items (vocabulary and grammar explanations, and maybe sentences to analyze).
+6. The chat functionality gives the following error message:
+Task failed: StudyManager.send_chat_message() missing 1 required positional argument: 'current_history'
+7. There is no way to view the queue of explanations being processed or other things being sent to the LLM.
+8. Sometimes the app needs to be opened and closed to view explanations that were generated.
+9. no related items are displayed for sentence explanations.
+10. Same as above but for word explanations.
+11. Sometimes the generated related items are given in an unhelpful way. Perhaps some examples could help for in context learning.
+12. Not all prompts are customizable in the app itself.
+13. No restore default prompt option.

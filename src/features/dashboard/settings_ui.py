@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.ui_utils import setup_standard_header
+from src.features.dashboard.prompt_editor_ui import PromptEditorDialog
 
 class SettingsFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager):
@@ -9,7 +10,7 @@ class SettingsFrame(ttk.Frame):
         self.controller = controller
         self.study_manager = study_manager
         
-        self.ollama_available = study_manager.ollama_client is not None
+        self.ollama_available = study_manager.ollama_client is not None and study_manager.ollama_client.is_available()
         self.available_models = []
         
         self.setup_ui()
@@ -62,7 +63,7 @@ class SettingsFrame(ttk.Frame):
         
         if self.ollama_available:
              try:
-                 self.available_models = [m['name'] for m in self.study_manager.ollama_client.get_available_models()]
+                 self.available_models = self.study_manager.ollama_client.get_available_models()
                  self.model_combo['values'] = self.available_models
              except:
                  self.model_combo['values'] = ["Error fetching models"]
@@ -76,17 +77,18 @@ class SettingsFrame(ttk.Frame):
         
         # --- TAB 3: PROMPTS (Tuning) ---
         prompt_tab = ttk.Frame(self.notebook, padding="20")
-        self.notebook.add(prompt_tab, text="Advanced Prompts")
+        self.notebook.add(prompt_tab, text="AI Prompts")
         
-        ttk.Label(prompt_tab, text="Custom LLM Instructions", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(prompt_tab, text="Customize AI Behavior", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
         
-        ttk.Label(prompt_tab, text="Definitions & Vocabulary:").pack(anchor="w")
-        self.prompt_def_text = scrolledtext.ScrolledText(prompt_tab, height=6, font=("Courier", 10))
-        self.prompt_def_text.pack(fill="x", pady=(5, 15))
+        ttk.Label(prompt_tab, text="You can customize exactly how the AI defines words, explains grammar, grades your writing, and interacts in chat.", 
+                  wraplength=500, justify="left").pack(anchor="w", pady=(0, 20))
         
-        ttk.Label(prompt_tab, text="Grammar & Sentence Explanations:").pack(anchor="w")
-        self.prompt_gram_text = scrolledtext.ScrolledText(prompt_tab, height=6, font=("Courier", 10))
-        self.prompt_gram_text.pack(fill="x", pady=5)
+        ttk.Button(prompt_tab, text="🎨 Open Advanced Prompt Editor", 
+                   command=self.open_prompt_editor, style="Accent.TButton").pack(anchor="w", pady=10)
+        
+        ttk.Label(prompt_tab, text="Tip: Use the editor to add specific instructions for your target language or to change the tone of the AI tutor.", 
+                  font=("Arial", 9, "italic"), foreground="gray", wraplength=500).pack(anchor="w", pady=20)
         
         # --- FOOTER: SAVE BUTTON ---
         footer = ttk.Frame(self, padding=20)
@@ -101,6 +103,10 @@ class SettingsFrame(ttk.Frame):
         if hasattr(self.controller, 'show_home'):
             self.controller.show_home()
 
+    def open_prompt_editor(self):
+        editor = PromptEditorDialog(self.winfo_toplevel(), self.study_manager)
+        editor.grab_set()
+
     def load_settings(self):
         # Load from StudyManager / Database
         self.study_lang_var.set(self.study_manager.study_language)
@@ -111,13 +117,6 @@ class SettingsFrame(ttk.Frame):
         
         self.timeout_var.set(self.study_manager.get_request_timeout())
         self.preload_var.set(self.study_manager.get_preload_on_startup())
-        
-        # Prompts (get default/custom)
-        def_p = self.study_manager.get_word_prompt('definition', 'native')
-        gram_p = self.study_manager.get_sentence_prompt('grammar')
-        
-        self.prompt_def_text.insert("1.0", def_p)
-        self.prompt_gram_text.insert("1.0", gram_p)
 
     def save_settings(self):
         try:
@@ -128,13 +127,6 @@ class SettingsFrame(ttk.Frame):
             self.study_manager.set_ollama_model(self.model_var.get())
             self.study_manager.set_request_timeout(self.timeout_var.get())
             self.study_manager.set_preload_on_startup(self.preload_var.get())
-            
-            # Save custom prompts
-            def_p = self.prompt_def_text.get("1.0", tk.END).strip()
-            gram_p = self.prompt_gram_text.get("1.0", tk.END).strip()
-            
-            self.study_manager.set_word_prompt('definition', 'native', def_p)
-            self.study_manager.set_sentence_prompt('grammar', gram_p)
             
             messagebox.showinfo("Success", "Settings saved successfully!")
             self.go_back()

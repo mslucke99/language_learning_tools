@@ -7,7 +7,8 @@ class FlashcardDatabase:
     def __init__(self, db_name="flashcards.db"):
         # check_same_thread=False allows the connection to be used across Flask request threads
         # This is safe for this application since we're not doing concurrent writes
-        self.conn = sqlite3.connect(db_name, check_same_thread=False)
+        # isolation_level=None sets autocommit mode for immediate visibility across threads
+        self.conn = sqlite3.connect(db_name, check_same_thread=False, isolation_level=None)
         self._create_tables()
 
     def _create_tables(self):
@@ -146,10 +147,18 @@ class FlashcardDatabase:
                 user_writing TEXT NOT NULL,
                 feedback TEXT,
                 grade TEXT,
+                analysis TEXT, -- JSON blob for suggestions
                 study_language TEXT,
                 created_at TEXT NOT NULL
             )
         """)
+        
+        # Migration: Ensure analysis column exists for existing users
+        try:
+            cursor.execute("ALTER TABLE writing_sessions ADD COLUMN analysis TEXT")
+        except sqlite3.OperationalError:
+            # Column already exists
+            pass
         
         # Create chat_sessions table
         cursor.execute("""
@@ -727,25 +736,53 @@ class FlashcardDatabase:
 
     # ===== WRITING SESSIONS METHODS =====
 
-    def add_writing_session(self, topic: str, user_writing: str, feedback: str, grade: str, study_language: str) -> int:
+    def add_writing_session(self, topic: str, user_writing: str, feedback: str, grade: str, study_language: str, analysis: str = None) -> int:
         """Add a new writing session record."""
         cursor = self.conn.cursor()
         cursor.execute("""
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (topic, user_writing, feedback, grade, study_language, datetime.now().isoformat()))
-        self.db.conn.commit()
+            INSERT INTO writing_sessions (topic, user_writing, feedback, grade, study_language, analysis, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (topic, user_writing, feedback, grade, study_language, analysis, datetime.now().isoformat()))
+        self.conn.commit()
         return cursor.lastrowid
 
-    def get_writing_sessions(self, study_language: Optional[str] = None) -> List[Dict]:
-        """Get history of writing sessions."""
+    def get_writing_sessions(self, language: str = None) -> List[Dict]:
+        """Get all writing sessions, optionally filtered by language."""
         cursor = self.conn.cursor()
-        if study_language:
-            cursor.execute("SELECT * FROM writing_sessions WHERE study_language = ? ORDER BY created_at DESC", (study_language,))
+        if language:
+            cursor.execute("""
+                SELECT id, topic, user_writing, feedback, grade, study_language, analysis, created_at 
+                FROM writing_sessions 
+                WHERE study_language = ? 
+                ORDER BY created_at DESC
+            """, (language,))
         else:
-            cursor.execute("SELECT * FROM writing_sessions ORDER BY created_at DESC")
+            cursor.execute("""
+                SELECT id, topic, user_writing, feedback, grade, study_language, analysis, created_at 
+                FROM writing_sessions 
+                ORDER BY created_at DESC
+            """)
         
-        cols = [desc[0] for desc in cursor.description]
-        return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        sessions = []
+        for row in cursor.fetchall():
+            sessions.append({
+                'id': row[0],
+                'topic': row[1],
+                'user_writing': row[2],
+                'feedback': row[3],
+                'grade': row[4],
+                'study_language': row[5],
+                'analysis': row[6],
+                'created_at': row[7]
+            })
+        return sessions
+
+    def delete_writing_session(self, session_id: int) -> bool:
+        """Delete a writing session."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM writing_sessions WHERE id = ?", (session_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
 
     # ===== CHAT METHODS =====
 
@@ -798,6 +835,37 @@ class FlashcardDatabase:
         cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
         self.conn.commit()
         return cursor.rowcount > 0
+
+    # ===== SETTINGS METHODS =====
+
+    def get_setting(self, key: str, default: str = None) -> Optional[str]:
+        """Get a setting value by key."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT setting_value FROM study_settings WHERE setting_key = ?", (key,))
+        row = cursor.fetchone()
+        return row[0] if row else default
+
+    def update_setting(self, key: str, value: str):
+        """Update or insert a setting."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO study_settings (setting_key, setting_value)
+            VALUES (?, ?)
+            ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value
+        """, (key, value))
+        self.conn.commit()
+
+    def delete_setting(self, key: str):
+        """Delete a setting."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM study_settings WHERE setting_key = ?", (key,))
+        self.conn.commit()
+
+    def clear_settings_pattern(self, pattern: str):
+        """Delete settings matching a LIKE pattern."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM study_settings WHERE setting_key LIKE ?", (pattern,))
+        self.conn.commit()
 
     def close(self):
         self.conn.close()

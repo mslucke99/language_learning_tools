@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
+import json
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header
@@ -17,51 +18,253 @@ class WritingLabFrame(ttk.Frame):
         if not self.embedded:
             setup_standard_header(self, "✍️ Writing Composition Lab", back_cmd=self.go_back)
         
-        paned = tk.PanedWindow(self, orient="vertical", sashrelief="raised", sashwidth=4)
-        paned.pack(fill="both", expand=True, pady=10)
+        # MAIN TABBED CONTAINER
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # TAB 1: COMPOSITION
+        self.comp_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.comp_tab, text="✍️ Current Composition")
+        
+        self.setup_composition_tab()
+        
+        # TAB 2: HISTORY
+        self.history_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.history_tab, text="📜 Writing History")
+        
+        self.setup_history_tab()
+
+    def setup_composition_tab(self):
+        # MAIN CONTAINER for Tab 1
+        main_container = ttk.Frame(self.comp_tab)
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
         
         # INPUT SECTION
-        input_frame = ttk.Frame(paned)
-        paned.add(input_frame, height=350)
+        input_frame = ttk.LabelFrame(main_container, text="✏️ Composition Input", padding="10")
+        input_frame.pack(fill="both", expand=True, pady=(0, 5))
         
+        # Topic
         topic_header = ttk.Frame(input_frame)
         topic_header.pack(fill="x", pady=(0, 5))
-        ttk.Label(topic_header, text="Topic & Background:", font=("Segoe UI", 12, "bold")).pack(side="left")
+        ttk.Label(topic_header, text="Topic:", font=("Segoe UI", 10, "bold")).pack(side="left")
+        ttk.Button(topic_header, text="🎲 Generate Topic", command=self._generate_writing_topic).pack(side="right")
         
-        topic_btn_frame = ttk.Frame(topic_header)
-        topic_btn_frame.pack(side="right")
-        ttk.Button(topic_btn_frame, text="🎲 AI Generate Topic", command=self._generate_writing_topic).pack(side="left", padx=5)
+        self.topic_text = tk.Text(input_frame, height=3, font=("Segoe UI", 10), wrap="word")
+        self.topic_text.pack(fill="x", pady=(0, 10))
+        self.topic_text.insert("1.0", "Type your own topic or click 'Generate Topic'...")
         
-        self.topic_text = tk.Text(input_frame, height=4, font=("Segoe UI", 10), wrap="word")
-        self.topic_text.pack(fill="x", pady=5)
-        self.topic_text.insert("1.0", "Type your own topic here, or click 'AI Generate Topic'...")
+        # Writing Area
+        ttk.Label(input_frame, text="Your Composition:", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        self.writing_text = tk.Text(input_frame, font=("Segoe UI", 11), wrap="word", undo=True, height=10)
+        self.writing_text.pack(fill="both", expand=True)
         
-        ttk.Label(input_frame, text="Your Composition:", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(10, 5))
-        self.writing_text = tk.Text(input_frame, font=("Segoe UI", 11), wrap="word", undo=True)
-        self.writing_text.pack(fill="both", expand=True, pady=5)
+        # ACTION TOOLBAR (PROMINENT PLACEMENT)
+        action_toolbar = ttk.Frame(main_container)
+        action_toolbar.pack(fill="x", pady=10)
         
-        btn_frame = ttk.Frame(input_frame)
-        btn_frame.pack(fill="x", pady=10)
-        self.grade_btn = ttk.Button(btn_frame, text="🏆 Grade & Get Feedback", command=self._grade_writing)
-        self.grade_btn.pack(side="right", padx=5)
+        # Center the grade button with larger size
+        self.grade_btn = ttk.Button(
+            action_toolbar, 
+            text="🏆 Grade & Get Feedback", 
+            command=self._grade_writing,
+            width=30
+        )
+        self.grade_btn.pack(side="left", padx=5, ipady=8) 
+        
+        ttk.Button(
+            action_toolbar, 
+            text="💾 Save Draft", 
+            command=self._save_draft
+        ).pack(side="left", padx=5, ipady=8)
+
+        ttk.Button(
+            action_toolbar, 
+            text="🆕 New / Clear", 
+            command=self._new_composition
+        ).pack(side="right", padx=5, ipady=5)
         
         # FEEDBACK SECTION
-        self.feedback_frame = ttk.Frame(paned)
-        paned.add(self.feedback_frame)
+        feedback_frame = ttk.LabelFrame(main_container, text="📊 AI Feedback & Suggestions", padding="10")
+        feedback_frame.pack(fill="both", expand=True, pady=(5, 0))
         
-        ttk.Label(self.feedback_frame, text="Feedback & Suggestions:", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 5))
+        self.feedback_display = scrolledtext.ScrolledText(feedback_frame, font=("Segoe UI", 10), wrap="word", state="disabled", height=8)
+        self.feedback_display.pack(fill="both", expand=True, pady=(0, 10))
         
-        self.feedback_display = scrolledtext.ScrolledText(self.feedback_frame, font=("Segoe UI", 10), wrap="word", state="disabled")
-        self.feedback_display.pack(fill="both", expand=True, pady=5)
-        
-        self.sugg_bar = ttk.Frame(self.feedback_frame)
-        self.sugg_bar.pack(fill="x", pady=5)
+        self.sugg_bar = ttk.Frame(feedback_frame)
+        self.sugg_bar.pack(fill="x")
         self.sugg_label = ttk.Label(self.sugg_bar, text="AI Suggestions: None", font=("Segoe UI", 9, "italic"))
         self.sugg_label.pack(side="left")
+
+    def setup_history_tab(self):
+        main_container = ttk.Frame(self.history_tab)
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Toolbar
+        toolbar = ttk.Frame(main_container)
+        toolbar.pack(fill="x", pady=(0, 10))
+        
+        ttk.Button(toolbar, text="🔄 Refresh", command=self._refresh_history).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="📂 Load Selected", command=self._load_session).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="🗑️ Delete", command=self._delete_session).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="📤 Export Selected", command=self._export_session).pack(side="right", padx=2)
+        
+        # Treeview
+        columns = ("date", "topic", "language", "grade")
+        self.history_tree = ttk.Treeview(main_container, columns=columns, show="headings")
+        
+        self.history_tree.heading("date", text="Date/Time")
+        self.history_tree.heading("topic", text="Topic")
+        self.history_tree.heading("language", text="Language")
+        self.history_tree.heading("grade", text="Grade")
+        
+        self.history_tree.column("date", width=150)
+        self.history_tree.column("topic", width=300)
+        self.history_tree.column("language", width=80)
+        self.history_tree.column("grade", width=80)
+        
+        self.history_tree.pack(fill="both", expand=True)
+        
+        # Bind double-click to load
+        self.history_tree.bind("<Double-1>", lambda e: self._load_session())
+        
+        # Initial load
+        self._refresh_history()
 
     def go_back(self):
         if hasattr(self.controller, 'show_home'):
             self.controller.show_home()
+
+    def _save_draft(self):
+        topic = self.topic_text.get("1.0", "end").strip()
+        writing = self.writing_text.get("1.0", "end").strip()
+        
+        if not writing or writing.startswith("Type your own"):
+            messagebox.showwarning("Empty", "Nothing to save!")
+            return
+            
+        # Save as draft with N/A grade
+        self.study_manager.db.add_writing_session(
+            topic, writing, "", "Draft", self.study_manager.study_language
+        )
+        messagebox.showinfo("Success", "Draft saved to history!")
+        self._refresh_history()
+
+    def _new_composition(self):
+        if messagebox.askyesno("Clear", "Start a new composition?"):
+            self.topic_text.delete("1.0", "end")
+            self.topic_text.insert("1.0", "Type your own topic or click 'Generate Topic'...")
+            self.writing_text.delete("1.0", "end")
+            self.feedback_display.configure(state="normal")
+            self.feedback_display.delete("1.0", "end")
+            self.feedback_display.configure(state="disabled")
+            for widget in self.sugg_bar.winfo_children(): widget.destroy()
+            self.sugg_label = ttk.Label(self.sugg_bar, text="AI Suggestions: None", font=("Segoe UI", 9, "italic"))
+            self.sugg_label.pack(side="left")
+
+    def _refresh_history(self):
+        # Clear existing
+        for item in self.history_tree.get_children():
+            self.history_tree.delete(item)
+            
+        # Load from DB
+        sessions = self.study_manager.get_writing_history()
+        for s in sessions:
+            # Format date for display
+            date_str = s['created_at'].replace('T', ' ')[:16]
+            self.history_tree.insert("", "end", iid=s['id'], values=(
+                date_str, s['topic'], s['study_language'], s['grade']
+            ))
+
+    def _load_session(self):
+        selected = self.history_tree.selection()
+        if not selected:
+            messagebox.showwarning("Select", "Please select a session from history.")
+            return
+            
+        session_id = selected[0]
+        sessions = self.study_manager.get_writing_history()
+        session = next((s for s in sessions if str(s['id']) == str(session_id)), None)
+        
+        if session:
+            # Populate text areas
+            self.topic_text.delete("1.0", "end")
+            self.topic_text.insert("1.0", session['topic'])
+            self.writing_text.delete("1.0", "end")
+            self.writing_text.insert("1.0", session['user_writing'])
+            
+            # Populate feedback
+            self.feedback_display.configure(state="normal")
+            self.feedback_display.delete("1.0", "end")
+            self.feedback_display.insert("1.0", session['feedback'] or "")
+            self.feedback_display.configure(state="disabled")
+            
+            # Handle suggestions if analysis exists
+            if session.get('analysis'):
+                try:
+                    suggestions = json.loads(session['analysis'])
+                    self._display_writing_feedback(session['feedback'], suggestions)
+                except:
+                    pass
+            
+            # Switch tab
+            self.notebook.select(self.comp_tab)
+
+    def _delete_session(self):
+        selected = self.history_tree.selection()
+        if not selected:
+            return
+            
+        if messagebox.askyesno("Delete", "Delete this session from history?"):
+            session_id = selected[0]
+            self.study_manager.db.delete_writing_session(session_id)
+            self._refresh_history()
+
+    def _export_session(self):
+        selected = self.history_tree.selection()
+        if not selected:
+            messagebox.showwarning("Select", "Please select a session to export.")
+            return
+            
+        session_id = selected[0]
+        sessions = self.study_manager.get_writing_history()
+        session = next((s for s in sessions if str(s['id']) == str(session_id)), None)
+        
+        if not session: return
+
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(
+            defaultextension=".md",
+            filetypes=[("Markdown", "*.md"), ("Text", "*.txt")],
+            initialfile=f"Writing_{session['created_at'][:10]}.md"
+        )
+        
+        if path:
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(f"# Writing Session: {session['topic']}\n")
+                    f.write(f"**Date:** {session['created_at'].replace('T', ' ')[:16]}\n")
+                    f.write(f"**Language:** {session['study_language']}\n")
+                    f.write(f"**Grade:** {session['grade']}\n\n")
+                    f.write("## Your Writing\n")
+                    f.write(f"{session['user_writing']}\n\n")
+                    f.write("## AI Feedback\n")
+                    f.write(f"{session['feedback']}\n")
+                    
+                    if session.get('analysis'):
+                        try:
+                            sugg = json.loads(session['analysis'])
+                            if sugg.get('flashcards') or sugg.get('grammar'):
+                                f.write("\n## Related Items\n")
+                                for fc in sugg.get('flashcards', []):
+                                    f.write(f"- Word: {fc['word']} | {fc['definition']}\n")
+                                for gm in sugg.get('grammar', []):
+                                    f.write(f"- Grammar: {gm['title']}\n")
+                        except Exception as e:
+                            print(f"Export suggestions error: {e}")
+                
+                messagebox.showinfo("Exported", f"Session exported to {path}")
+            except Exception as e:
+                messagebox.showerror("Export Error", str(e))
 
     def _generate_writing_topic(self):
         self.topic_text.delete("1.0", "end")
@@ -129,7 +332,8 @@ class WritingLabFrame(ttk.Frame):
             if gram_count > 0:
                 ttk.Button(self.sugg_bar, text="➕ Add Grammar", command=lambda: self._add_suggestions(suggestions, 'grammar')).pack(side="left", padx=2)
         else:
-            ttk.Label(self.sugg_bar, text="Suggestions: None found.", font=("Segoe UI", 9, "italic")).pack(side="left")
+            self.sugg_label = ttk.Label(self.sugg_bar, text="Suggestions: None found.", font=("Segoe UI", 9, "italic"))
+            self.sugg_label.pack(side="left")
 
     def _add_suggestions(self, suggestions, type_name):
         db = self.study_manager.db

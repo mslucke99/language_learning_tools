@@ -46,7 +46,12 @@ WORD_PROMPTS = {
             'unless specified otherwise. Highlight the word in **bold**.\n\n'
             '**Suggestions**: If any other words in these examples are difficult, '
             'append a flashcard suggestion at the very end in this format: '
-            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>'
+            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n\n'
+            '**Example Output**:\n'
+            '1. **사과**를 먹어요. (I eat an apple.)\n'
+            '2. 이 **사과**는 빨개요. (This apple is red.)\n'
+            '3. **사과**가 맛있어요. (The apple is delicious.)\n\n'
+            '<flashcard word="빨개요">To be red</flashcard>'
         ),
     }
 }
@@ -63,7 +68,10 @@ SENTENCE_PROMPTS = {
             '3. **Key Rules**: Any specific grammar rules (tense, case, aspect) used here.\n\n'
             '**Suggestions**: If there is a distinct grammar pattern used (e.g., a specific conjugation rule or sentence structure pattern), '
             'append a grammar suggestion at the very end in this format: '
-            '<grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>'
+            '<grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>\n\n'
+            '**Example Output**:\n'
+            'This sentence uses the -고 싶다 pattern to express desire...\n\n'
+            '<grammar_pattern title="-고 싶다">Used to express "I want to do..." something.</grammar_pattern>'
         ),
     },
     'vocabulary': {
@@ -102,7 +110,12 @@ SENTENCE_PROMPTS = {
             '4. **Usage Tip**: A practical tip on how to use these patterns elsewhere.\n\n'
             '**Suggestions**: \n'
             '- If there is a distinct grammar pattern, append: <grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>\n'
-            '- If there is a difficult word worth studying separately, append: <flashcard word="TERM">BRIEF_DEFINITION</flashcard>'
+            '- If there is a difficult word worth studying separately, append: <flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n\n'
+            '**Example Output**:\n'
+            '1. Translation: ...\n'
+            '2. Literal Breakdown: ...\n\n'
+            '<grammar_pattern title="Subject Particles">Used to mark the subject...</grammar_pattern>\n'
+            '<flashcard word="친구">Friend</flashcard>'
         ),
     }
 }

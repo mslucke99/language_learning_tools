@@ -307,8 +307,17 @@ class WordsViewFrame(ttk.Frame):
             return
             
         if task_info['item_id'] == self.current_word_id:
-            # Refresh view
+            # Refresh data and view
+            self.words_data = self.study_manager.get_imported_words()
+            self._update_words_view()
             self._on_word_selected(None) # Reload content
+            
+            # Handle suggestions
+            suggestions = status.get('suggestions', {})
+            if suggestions:
+                # TODO: Implement _populate_suggestions for words_view similar to sentences_view
+                pass
+                
             messagebox.showinfo("Complete", "Generation complete!")
 
     def _add_manual_word_dialog(self):
