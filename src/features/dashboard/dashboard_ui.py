@@ -4,6 +4,7 @@ from src.core.database import FlashcardDatabase
 from src.services.llm_service import get_ollama_client, is_ollama_available
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.import_export import ImportExportManager
+from src.core.localization import tr, set_locale
 
 # Import Feature Views
 from src.features.flashcards.ui.deck_selection import DeckSelectionFrame
@@ -28,7 +29,7 @@ from src.features.dashboard.dev_console_ui import DevConsoleDialog
 class DashboardApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Language Learning Suite")
+        self.root.title(tr("app_title", "Language Learning Suite"))
         self.root.geometry("1300x850") # Slightly larger default
         
         # Initialize Core Services
@@ -38,6 +39,10 @@ class DashboardApp:
         
         self.study_manager = StudyManager(self.db, self.ollama_client)
         self.io_manager = ImportExportManager(self.db, self.study_manager)
+        
+        # Apply Persisted UI Locale
+        set_locale(self.study_manager.ui_language)
+        self.root.title(tr("app_title", "Language Learning Suite"))
         
         # Pre-load Ollama if configured
         if self.ollama_available and self.study_manager.get_preload_on_startup():
@@ -180,7 +185,7 @@ class DashboardApp:
         self.status_bar = ttk.Frame(self.root, relief="sunken", padding=(10, 2))
         self.status_bar.pack(side="bottom", fill="x")
         
-        self.ollama_status_label = ttk.Label(self.status_bar, text="Ollama: Checking...")
+        self.ollama_status_label = ttk.Label(self.status_bar, text=tr("status_ollama_checking", "Ollama: Checking..."))
         self.ollama_status_label.pack(side="left", padx=5)
         
         ttk.Separator(self.status_bar, orient="vertical").pack(side="left", fill="y", padx=10)
@@ -188,7 +193,7 @@ class DashboardApp:
         self.queue_status_label = ttk.Label(self.status_bar, text="AI Tasks: 0")
         self.queue_status_label.pack(side="left", padx=5)
         
-        self.task_mgr_btn = ttk.Button(self.status_bar, text="📋 Tasks", command=self.show_task_manager, width=10)
+        self.task_mgr_btn = ttk.Button(self.status_bar, text=tr("btn_tasks", "📋 Tasks"), command=self.show_task_manager, width=10)
         self.task_mgr_btn.pack(side="right", padx=5)
 
         self.dev_btn = ttk.Button(self.status_bar, text="🚀 Dev", command=self.show_dev_console, width=8)
@@ -197,9 +202,9 @@ class DashboardApp:
     def _update_status_bar(self):
         # Update Ollama Status
         if self.ollama_available:
-            self.ollama_status_label.config(text=f"Ollama: Online ({self.study_manager.ollama_model or 'Default'})", foreground="green")
+            self.ollama_status_label.config(text=f"Ollama: {tr('status_online', 'Online')} ({self.study_manager.ollama_model or 'Default'})", foreground="green")
         else:
-            self.ollama_status_label.config(text="Ollama: Offline", foreground="red")
+            self.ollama_status_label.config(text=f"Ollama: {tr('status_offline', 'Offline')}", foreground="red")
             
         # Update Queue Status
         q_status = self.study_manager.get_queue_status()
@@ -225,22 +230,22 @@ class HomeDashboard(ttk.Frame):
         super().__init__(parent)
         self.controller = controller
         
-        ttk.Label(self, text="Language Learning Suite", font=("Arial", 32, "bold")).pack(pady=(60, 20))
-        ttk.Label(self, text="What would you like to do today?", font=("Arial", 14, "italic")).pack(pady=(0, 40))
+        ttk.Label(self, text=tr("app_title"), font=("Arial", 32, "bold")).pack(pady=(60, 20))
+        ttk.Label(self, text=tr("msg_welcome", "What would you like to do today?"), font=("Arial", 14, "italic")).pack(pady=(0, 40))
         
         # Grid frame for buttons
         grid_frame = ttk.Frame(self)
         grid_frame.pack(pady=20)
         
         # Row 1: Core Learning
-        ttk.Button(grid_frame, text="🗂️ Flashcard Decks", command=controller.show_flashcards_dashboard, style="Large.TButton").grid(row=0, column=0, padx=15, pady=15, sticky="nsew")
-        ttk.Button(grid_frame, text="📚 Study Tools", command=controller.show_study_center_dashboard, style="Large.TButton").grid(row=0, column=1, padx=15, pady=15, sticky="nsew")
-        ttk.Button(grid_frame, text="📝 Practice Quiz", command=controller.show_quiz_setup, style="Large.TButton").grid(row=0, column=2, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_flashcards", "🗂️ Flashcard Decks"), command=controller.show_flashcards_dashboard, style="Large.TButton").grid(row=0, column=0, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_study_tools", "📚 Study Tools"), command=controller.show_study_center_dashboard, style="Large.TButton").grid(row=0, column=1, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_quiz", "📝 Practice Quiz"), command=controller.show_quiz_setup, style="Large.TButton").grid(row=0, column=2, padx=15, pady=15, sticky="nsew")
         
         # Row 2: Advanced Practice
-        ttk.Button(grid_frame, text="✍️ Writing Lab", command=controller.show_writing_lab_view, style="Large.TButton").grid(row=1, column=0, padx=15, pady=15, sticky="nsew")
-        ttk.Button(grid_frame, text="💬 AI Tutor Chat", command=controller.show_chat_dashboard, style="Large.TButton").grid(row=1, column=1, padx=15, pady=15, sticky="nsew")
-        ttk.Button(grid_frame, text="⚙️ App Settings", command=controller.show_settings, style="Large.TButton").grid(row=1, column=2, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_writing_lab", "✍️ Writing Lab"), command=controller.show_writing_lab_view, style="Large.TButton").grid(row=1, column=0, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_chat", "💬 AI Tutor Chat"), command=controller.show_chat_dashboard, style="Large.TButton").grid(row=1, column=1, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_settings", "⚙️ App Settings"), command=controller.show_settings, style="Large.TButton").grid(row=1, column=2, padx=15, pady=15, sticky="nsew")
         
         # Configure grid expansion
         for i in range(3):
@@ -251,4 +256,9 @@ class HomeDashboard(ttk.Frame):
         # Footer
         footer = ttk.Frame(self)
         footer.pack(side="bottom", fill="x", pady=20)
-        ttk.Label(footer, text=f"Study Language: {controller.study_manager.study_language}", font=("Arial", 10)).pack(side="right", padx=30)
+        
+        # Disclaimer at bottom
+        disclaimer = ttk.Label(footer, text=tr("msg_disclaimer"), font=("Arial", 8), foreground="gray", wraplength=800, justify="center")
+        disclaimer.pack(pady=(0, 10))
+
+        ttk.Label(footer, text=f"{tr('lbl_language')} {controller.study_manager.study_language}", font=("Arial", 10)).pack(side="right", padx=30)

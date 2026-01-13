@@ -11,6 +11,7 @@ from ollama_integration import is_ollama_available
 from datetime import datetime
 import re
 from quiz_manager import QuizManager
+from localization import tr
 
 
 class StudyGUI:
@@ -158,7 +159,7 @@ class StudyGUI:
         frame.pack(fill="both", expand=True)
         
         # Title
-        title = ttk.Label(frame, text="Study Center", style="Title.TLabel")
+        title = ttk.Label(frame, text=tr("study_center"), style="Title.TLabel")
         title.pack(pady=20)
         
         # Stats frame
@@ -179,6 +180,19 @@ Study Languages:
         
         stats_label = ttk.Label(stats_frame, text=stats_content, justify="left", font=("Courier", 10))
         stats_label.pack()
+
+        # Language Selection
+        lang_frame = ttk.Frame(frame)
+        lang_frame.pack(fill="x", pady=10)
+        
+        ttk.Label(lang_frame, text=tr("lbl_language"), font=("Arial", 10, "bold")).pack(side="left", padx=5)
+        
+        self.study_lang_var = tk.StringVar(value=self.study_manager.study_language)
+        lang_combo = ttk.Combobox(lang_frame, textvariable=self.study_lang_var, 
+                                 values=["Spanish", "French", "German", "Japanese", "Korean", "Mandarin", "Italian", "Portuguese", "Russian", "Arabic", "Biblical Greek"],
+                                 width=15, state="readonly")
+        lang_combo.pack(side="left", padx=5)
+        lang_combo.bind("<<ComboboxSelected>>", self._on_study_language_changed)
         
         # Main buttons frame
         btn_frame = ttk.Frame(frame)
@@ -187,7 +201,7 @@ Study Languages:
         # Study words button
         words_btn = ttk.Button(
             btn_frame,
-            text="📚 Study Words",
+            text=tr("btn_study_words"),
             command=self.show_words_view,
             style="Large.TButton"
         )
@@ -196,7 +210,7 @@ Study Languages:
         # Study sentences button
         sentences_btn = ttk.Button(
             btn_frame,
-            text="📖 Study Sentences",
+            text=tr("btn_study_sentences"),
             command=self.show_sentences_view,
             style="Large.TButton"
         )
@@ -205,7 +219,7 @@ Study Languages:
         # Grammar Book button
         grammar_btn = ttk.Button(
             btn_frame,
-            text="📒 Grammar Book",
+            text=tr("btn_grammar_book"),
             command=self.show_grammar_book_view,
             style="Large.TButton"
         )
@@ -214,7 +228,7 @@ Study Languages:
         # Writing Composition Lab button
         writing_btn = ttk.Button(
             btn_frame,
-            text="✍️ Writing Lab",
+            text=tr("btn_writing_lab"),
             command=self.show_writing_lab_view,
             style="Large.TButton"
         )
@@ -223,7 +237,7 @@ Study Languages:
         # Chat with AI button
         chat_btn = ttk.Button(
             btn_frame,
-            text="💬 Chat with AI",
+            text=tr("btn_chat"),
             command=self.show_chat_dashboard,
             style="Large.TButton"
         )
@@ -232,19 +246,44 @@ Study Languages:
         # Quiz button
         quiz_btn = ttk.Button(
             btn_frame,
-            text="📝 Quiz Yourself",
+            text=tr("btn_quiz"),
             command=self.show_quiz_setup,
             style="Large.TButton"
         )
         quiz_btn.pack(side="left", padx=10, fill="both", expand=True)
         
         # Back button
-        back_btn = ttk.Button(frame, text="← Back to Main Menu", command=self.on_close)
+        back_btn = ttk.Button(frame, text=tr("btn_main_menu"), command=self.on_close)
         back_btn.pack(pady=10)
         
         # Status Label (Global)
         self.current_status_label = ttk.Label(frame, text="", font=("Arial", 10, "italic"), foreground="blue")
         self.current_status_label.pack(pady=5)
+
+        # Disclaimer
+        disclaimer_label = ttk.Label(frame, text=tr("msg_disclaimer"), font=("Arial", 8), foreground="gray", wraplength=600, justify="center")
+        disclaimer_label.pack(side="bottom", pady=20)
+        
+        # Test UI Language Switcher (Korean/English)
+        test_lang_frame = ttk.Frame(frame)
+        test_lang_frame.pack(side="bottom", pady=5)
+        ttk.Label(test_lang_frame, text="Switch UI (Test):", font=("Arial", 8)).pack(side="left")
+        ttk.Button(test_lang_frame, text="EN", width=3, command=lambda: self._switch_ui_locale('en')).pack(side="left", padx=2)
+        ttk.Button(test_lang_frame, text="KO", width=3, command=lambda: self._switch_ui_locale('ko')).pack(side="left", padx=2)
+
+    def _switch_ui_locale(self, lang_code):
+        """Switch UI language and refresh."""
+        from localization import set_locale
+        set_locale(lang_code)
+        self.show_study_center()
+
+    def _on_study_language_changed(self, event):
+        """Handle study language change."""
+        new_lang = self.study_lang_var.get()
+        if new_lang != self.study_manager.study_language:
+            self.study_manager.set_study_language(new_lang)
+            messagebox.showinfo("Language Changed", f"Switched study language to {new_lang}")
+            self.show_study_center() # Refresh stats
 
     
     # ========== WORDS VIEW ==========

@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, scrolledtext
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.ui_utils import setup_standard_header
 from src.features.dashboard.prompt_editor_ui import PromptEditorDialog
+from src.core.localization import tr, set_locale
 
 class SettingsFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager):
@@ -17,7 +18,7 @@ class SettingsFrame(ttk.Frame):
         self.load_settings()
         
     def setup_ui(self):
-        setup_standard_header(self, "⚙️ Application Settings", back_cmd=self.go_back)
+        setup_standard_header(self, tr("header_settings", "⚙️ Application Settings"), back_cmd=self.go_back)
         
         # Main Notebook
         self.notebook = ttk.Notebook(self)
@@ -25,27 +26,39 @@ class SettingsFrame(ttk.Frame):
         
         # --- TAB 1: GENERAL (Languages) ---
         gen_tab = ttk.Frame(self.notebook, padding="20")
-        self.notebook.add(gen_tab, text="General")
+        self.notebook.add(gen_tab, text=tr("tab_general", "General"))
         
-        ttk.Label(gen_tab, text="Language Configuration", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 20))
+        ttk.Label(gen_tab, text=tr("lbl_language_config", "Language Configuration"), font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 20))
         
         lang_grid = ttk.Frame(gen_tab)
         lang_grid.pack(fill="x")
         
-        ttk.Label(lang_grid, text="Study Language (target):").grid(row=0, column=0, sticky="w", pady=10)
+        # Study Language (Target)
+        ttk.Label(lang_grid, text=tr("lbl_study_lang", "Study Language (target):")).grid(row=0, column=0, sticky="w", pady=10)
         self.study_lang_var = tk.StringVar()
-        ttk.Entry(lang_grid, textvariable=self.study_lang_var, width=35).grid(row=0, column=1, sticky="w", padx=15)
+        self.study_lang_combo = ttk.Combobox(lang_grid, textvariable=self.study_lang_var, 
+                                            values=["Spanish", "French", "German", "Japanese", "Korean", "Mandarin", "Italian", "Portuguese", "Russian", "Arabic", "Biblical Greek"],
+                                            width=32, state="readonly")
+        self.study_lang_combo.grid(row=0, column=1, sticky="w", padx=15)
         
-        ttk.Label(lang_grid, text="Native Language (ui/def):").grid(row=1, column=0, sticky="w", pady=10)
+        # Native Language (for definitions)
+        ttk.Label(lang_grid, text=tr("lbl_native_lang", "Native Language (ui/def):")).grid(row=1, column=0, sticky="w", pady=10)
         self.native_lang_var = tk.StringVar()
         ttk.Entry(lang_grid, textvariable=self.native_lang_var, width=35).grid(row=1, column=1, sticky="w", padx=15)
         
-        ttk.Label(gen_tab, text="Tip: Study language is what you are learning. Native language is used for definitions and UI.", 
-                  font=("Arial", 9, "italic"), foreground="gray").pack(anchor="w", pady=20)
+        # UI Language (Test)
+        ttk.Label(lang_grid, text=tr("lbl_ui_language", "UI Language (Test):")).grid(row=2, column=0, sticky="w", pady=10)
+        ui_lang_frame = ttk.Frame(lang_grid)
+        ui_lang_frame.grid(row=2, column=1, sticky="w", padx=15)
+        ttk.Button(ui_lang_frame, text="EN", width=5, command=lambda: self._switch_ui('en')).pack(side="left", padx=2)
+        ttk.Button(ui_lang_frame, text="KO", width=5, command=lambda: self._switch_ui('ko')).pack(side="left", padx=2)
+
+        ttk.Label(gen_tab, text=tr("tip_languages", "Tip: Study language is what you are learning. Native language is used for definitions and UI."), 
+                  font=("Arial", 9, "italic"), foreground="gray", wraplength=500).pack(anchor="w", pady=20)
         
         # --- TAB 2: AI MODEL (Ollama) ---
         ai_tab = ttk.Frame(self.notebook, padding="20")
-        self.notebook.add(ai_tab, text="AI Model")
+        self.notebook.add(ai_tab, text=tr("tab_ai_model", "AI Model"))
         
         status_frame = ttk.Frame(ai_tab)
         status_frame.pack(fill="x", pady=(0, 20))
@@ -77,7 +90,7 @@ class SettingsFrame(ttk.Frame):
         
         # --- TAB 3: PROMPTS (Tuning) ---
         prompt_tab = ttk.Frame(self.notebook, padding="20")
-        self.notebook.add(prompt_tab, text="AI Prompts")
+        self.notebook.add(prompt_tab, text=tr("tab_prompts", "AI Prompts"))
         
         ttk.Label(prompt_tab, text="Customize AI Behavior", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
         
@@ -94,10 +107,20 @@ class SettingsFrame(ttk.Frame):
         footer = ttk.Frame(self, padding=20)
         footer.pack(fill="x")
         
-        save_btn = ttk.Button(footer, text="💾 Save All Settings", command=self.save_settings, style="Large.TButton")
+        save_btn = ttk.Button(footer, text=tr("btn_save_settings", "💾 Save All Settings"), command=self.save_settings, style="Large.TButton")
         save_btn.pack(side="right")
         
         ttk.Label(footer, text="Note: Some changes may require restarting the app.", font=("Arial", 9, "italic")).pack(side="left")
+
+    def _switch_ui(self, lang_code):
+        set_locale(lang_code)
+        self.study_manager.set_ui_language(lang_code)
+        # Refresh the current frame
+        self.setup_ui()
+        self.load_settings()
+        # Also notify controller if it needs to refresh other parts (like title bars)
+        if hasattr(self.controller, 'root'):
+            self.controller.root.title(tr("app_title"))
 
     def go_back(self):
         if hasattr(self.controller, 'show_home'):

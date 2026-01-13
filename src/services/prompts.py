@@ -232,3 +232,22 @@ CHAT_PROMPTS = {
         ),
     }
 }
+# Exam Practice prompts
+EXAM_PROMPTS = {
+    'generate_question': {
+        'name': 'Generate Exam Question',
+        'template': (
+            'You are an expert examiner for the {exam_name} ({level}) language exam. '
+            'Generate a realistic multiple-choice question for the {section} section. '
+            'The question must follow the exact difficulty and style of the real exam.\n\n'
+            'Strictly provide the response in this JSON format:\n'
+            '{{\n'
+            '  "question": "The question text",\n'
+            '  "options": ["Option A", "Option B", "Option C", "Option D"],\n'
+            '  "correct_answer": "The exact string of the correct option",\n'
+            '  "explanation": "Briefly explain why this is the correct answer in {native_language}"\n'
+            '}}\n\n'
+            '**Context**: Target language is {study_language}. Focus on {focus_area}.'
+        ),
+    }
+}

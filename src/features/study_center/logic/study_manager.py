@@ -39,6 +39,7 @@ class StudyManager:
         # Get user preferences
         self.native_language = self._get_setting('native_language', 'English')
         self.study_language = self._get_setting('study_language', 'Spanish')
+        self.ui_language = self._get_setting('ui_language', 'en')
         self.prefer_native_definitions = self._get_setting('prefer_native_definitions', 'true') == 'true'
         self.prefer_native_explanations = self._get_setting('prefer_native_explanations', 'false') == 'true'
         self.request_timeout = int(self._get_setting('request_timeout', '120'))
@@ -337,6 +338,11 @@ class StudyManager:
         """Set the user's native language."""
         self._set_setting('native_language', language)
         self.native_language = language
+
+    def set_ui_language(self, lang_code: str):
+        """Set the UI locale (en, ko, etc)."""
+        self._set_setting('ui_language', lang_code)
+        self.ui_language = lang_code
     
     def set_study_language(self, language: str):
         """Set the language being studied."""
@@ -400,10 +406,10 @@ class StudyManager:
                    COUNT(wd.id) as has_definition, ic.collection_id
             FROM imported_content ic
             LEFT JOIN word_definitions wd ON ic.id = wd.imported_content_id
-            WHERE ic.content_type = 'word'
+            WHERE ic.content_type = 'word' AND (ic.language = ? OR ic.language IS NULL OR ic.language = '')
             GROUP BY ic.id
             ORDER BY ic.created_at DESC
-        """)
+        """, (self.study_language,))
         
         words = []
         for row in cursor.fetchall():
@@ -427,10 +433,10 @@ class StudyManager:
                    COUNT(se.id) as has_explanation, ic.collection_id
             FROM imported_content ic
             LEFT JOIN sentence_explanations se ON ic.id = se.imported_content_id
-            WHERE ic.content_type = 'sentence'
+            WHERE ic.content_type = 'sentence' AND (ic.language = ? OR ic.language IS NULL OR ic.language = '')
             GROUP BY ic.id
             ORDER BY ic.created_at DESC
-        """)
+        """, (self.study_language,))
         
         sentences = []
         for row in cursor.fetchall():
