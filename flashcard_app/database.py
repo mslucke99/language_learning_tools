@@ -1,6 +1,7 @@
 import sqlite3
 from flashcard import Flashcard
 from datetime import datetime
+from typing import Optional, List, Dict
 
 class FlashcardDatabase:
     def __init__(self, db_name="flashcards.db"):
@@ -100,8 +101,182 @@ class FlashcardDatabase:
             )
         """)
         
+        # Create grammar_followups table for follow-up questions on sentence explanations
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS grammar_followups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sentence_explanation_id INTEGER NOT NULL,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                context TEXT,  -- The original sentence for reference
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (sentence_explanation_id) REFERENCES sentence_explanations (id) ON DELETE CASCADE
+            )
+        """)
+
+        # Create grammar_book_entries table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS grammar_book_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                language TEXT,
+                tags TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT
+            )
+        """)
+        # Create collections table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS collections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL, -- 'deck', 'word', 'sentence', 'grammar'
+                parent_id INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (parent_id) REFERENCES collections (id) ON DELETE SET NULL
+            )
+        """)
+
+        # Create writing_sessions table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS writing_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic TEXT NOT NULL,
+                user_writing TEXT NOT NULL,
+                feedback TEXT,
+                grade TEXT,
+                study_language TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        
+        # Create chat_sessions table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cur_topic TEXT,
+                study_language TEXT,
+                created_at TEXT NOT NULL,
+                last_updated TEXT NOT NULL
+            )
+        """)
+
+        # Create chat_messages table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER,
+                role TEXT NOT NULL, -- 'user' or 'assistant'
+                content TEXT NOT NULL,
+                analysis TEXT, -- JSON/XML blob for feedback/vocab
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES chat_sessions (id) ON DELETE CASCADE
+            )
+        """)
+
+        # Create quiz_sessions table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS quiz_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_type TEXT NOT NULL, -- 'deck', 'vocab', 'grammar'
+                source_id INTEGER,
+                question_count INTEGER,
+                difficulty TEXT,
+                score INTEGER,
+                total_questions INTEGER,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        # Create quiz_questions table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS quiz_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER,
+                question_text TEXT NOT NULL,
+                correct_answer TEXT NOT NULL,
+                choice_a TEXT,
+                choice_b TEXT,
+                choice_c TEXT,
+                choice_d TEXT,
+                user_answer TEXT,
+                is_correct INTEGER,
+                FOREIGN KEY (session_id) REFERENCES quiz_sessions (id) ON DELETE CASCADE
+            )
+        """)
+
+        # Migration: Add collection_id to existing tables
+        self._migrate_schema()
+        
         self.conn.commit()
 
+    def _migrate_schema(self):
+        """Add collection_id columns to existing tables for backwards compatibility."""
+        cursor = self.conn.cursor()
+        
+        # Dictionary of tables and the columns they need
+        migrations = {
+            "decks": "collection_id",
+            "imported_content": "collection_id",
+            "grammar_book_entries": "collection_id"
+        }
+        
+        for table, column in migrations.items():
+            # Check if column exists
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = [info[1] for info in cursor.fetchall()]
+            
+            if column not in columns:
+                print(f"[DB] Migrating table {table}: adding {column}")
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} INTEGER REFERENCES collections(id) ON DELETE SET NULL")
+        
+        self.conn.commit()
+
+    def create_collection(self, name: str, type: str, parent_id: int = None) -> int:
+        """Create a new collection and return its ID."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT INTO collections (name, type, parent_id, created_at) VALUES (?, ?, ?, ?)",
+            (name, type, parent_id, datetime.now().isoformat())
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_collections(self, type: str) -> list[dict]:
+        """Get all collections of a specific type."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id, name, parent_id FROM collections WHERE type = ? ORDER BY name", (type,))
+        cols = []
+        for row in cursor.fetchall():
+            cols.append({"id": row[0], "name": row[1], "parent_id": row[2]})
+        return cols
+
+    def delete_collection(self, collection_id: int):
+        """Delete a collection. Children collections and items will be 'uncategorized' (null)."""
+        cursor = self.conn.cursor()
+        # Set parent_id to NULL for children
+        cursor.execute("UPDATE collections SET parent_id = NULL WHERE parent_id = ?", (collection_id,))
+        # The ON DELETE SET NULL on other tables handles items
+        cursor.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
+        self.conn.commit()
+
+    def assign_to_collection(self, item_type: str, item_id: int, collection_id: int):
+        """Assign an item (deck, word, sentence, grammar) to a collection."""
+        cursor = self.conn.cursor()
+        table_map = {
+            'deck': 'decks',
+            'word': 'imported_content',
+            'sentence': 'imported_content',
+            'grammar': 'grammar_book_entries'
+        }
+        table = table_map.get(item_type)
+        if not table:
+            return False
+            
+        cursor.execute(f"UPDATE {table} SET collection_id = ? WHERE id = ?", (collection_id, item_id))
+        self.conn.commit()
+        return True
     def create_deck(self, name: str, description: str = "") -> int:
         """Create a new deck and return its ID."""
         cursor = self.conn.cursor()
@@ -118,7 +293,7 @@ class FlashcardDatabase:
     def get_all_decks(self) -> list[dict]:
         """Get all decks with their statistics."""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT id, name, description, created_at FROM decks ORDER BY name")
+        cursor.execute("SELECT id, name, description, created_at, collection_id FROM decks ORDER BY name")
         decks = []
         for row in cursor.fetchall():
             deck_id = row[0]
@@ -140,6 +315,7 @@ class FlashcardDatabase:
                 "name": row[1],
                 "description": row[2],
                 "created_at": row[3],
+                "collection_id": row[4],
                 "total_cards": total,
                 "due_cards": due
             })
@@ -225,11 +401,13 @@ class FlashcardDatabase:
         return flashcards
 
     def update_flashcard(self, flashcard):
-        # Update a flashcard's stats
+        # Update a flashcard's content and stats
         cursor = self.conn.cursor()
         cursor.execute(
-            "UPDATE flashcards SET last_reviewed = ?, easiness = ?, interval = ?, repetitions = ?, total_reviews = ?, correct_reviews = ? WHERE id = ?",
+            "UPDATE flashcards SET question = ?, answer = ?, last_reviewed = ?, easiness = ?, interval = ?, repetitions = ?, total_reviews = ?, correct_reviews = ? WHERE id = ?",
             (
+                flashcard.question,
+                flashcard.answer,
                 flashcard.last_reviewed.isoformat() if flashcard.last_reviewed else None,
                 flashcard.easiness,
                 flashcard.interval,
@@ -248,6 +426,26 @@ class FlashcardDatabase:
         cursor.execute("DELETE FROM flashcards WHERE id = ?", (flashcard_id,))
         self.conn.commit()
         return cursor.rowcount > 0
+
+    def find_flashcard_by_question(self, question: str) -> list[dict]:
+        """Find flashcards by question text across all decks (case-insensitive)."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT f.id, f.question, f.answer, d.name as deck_name
+            FROM flashcards f
+            JOIN decks d ON f.deck_id = d.id
+            WHERE LOWER(f.question) = LOWER(?)
+        """, (question.strip(),))
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                "id": row[0],
+                "question": row[1],
+                "answer": row[2],
+                "deck_name": row[3]
+            })
+        return results
 
     def get_deck_statistics(self, deck_id: int) -> dict:
         """Get statistics for a deck."""
@@ -390,6 +588,216 @@ class FlashcardDatabase:
             "processed": processed_counts.get(True, 0),
             "unprocessed": processed_counts.get(False, 0)
         }
+    
+    # ===== GRAMMAR FOLLOW-UP METHODS =====
+    
+    def add_grammar_followup(self, sentence_explanation_id: int, question: str, 
+                            answer: str, context: str = "") -> int:
+        """Add a grammar follow-up question and answer."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO grammar_followups 
+            (sentence_explanation_id, question, answer, context, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (sentence_explanation_id, question, answer, context, datetime.now().isoformat()))
+        self.conn.commit()
+        return cursor.lastrowid
+    
+    def get_grammar_followups(self, sentence_explanation_id: int) -> list[dict]:
+        """Get all grammar follow-ups for a sentence explanation."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, question, answer, context, created_at
+            FROM grammar_followups
+            WHERE sentence_explanation_id = ?
+            ORDER BY created_at ASC
+        """, (sentence_explanation_id,))
+        
+        followups = []
+        for row in cursor.fetchall():
+            followups.append({
+                "id": row[0],
+                "question": row[1],
+                "answer": row[2],
+                "context": row[3],
+                "created_at": row[4]
+            })
+        return followups
+    
+    def delete_grammar_followup(self, followup_id: int) -> bool:
+        """Delete a specific grammar follow-up."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM grammar_followups WHERE id = ?", (followup_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+    
+    def clear_grammar_followups(self, sentence_explanation_id: int) -> bool:
+        """Clear all follow-ups for a sentence explanation."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM grammar_followups WHERE sentence_explanation_id = ?", 
+                      (sentence_explanation_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    # ===== GRAMMAR BOOK METHODS =====
+
+    def add_grammar_entry(self, title: str, content: str, language: str = "", tags: str = "") -> int:
+        """Add a new entry to the grammar book."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO grammar_book_entries 
+            (title, content, language, tags, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (title, content, language, tags, datetime.now().isoformat(), datetime.now().isoformat()))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_grammar_entries(self, search_query: str = "") -> list[dict]:
+        """Get all grammar book entries, optionally filtered by search query."""
+        cursor = self.conn.cursor()
+        if search_query:
+            query = """
+                SELECT id, title, content, language, tags, created_at, updated_at, collection_id
+                FROM grammar_book_entries
+                WHERE title LIKE ? OR content LIKE ? OR tags LIKE ?
+                ORDER BY updated_at DESC
+            """
+            search_pattern = f"%{search_query}%"
+            cursor.execute(query, (search_pattern, search_pattern, search_pattern))
+        else:
+            cursor.execute("""
+                SELECT id, title, content, language, tags, created_at, updated_at, collection_id
+                FROM grammar_book_entries
+                ORDER BY updated_at DESC
+            """)
+        
+        entries = []
+        for row in cursor.fetchall():
+            entries.append({
+                "id": row[0],
+                "title": row[1],
+                "content": row[2],
+                "language": row[3],
+                "tags": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+                "collection_id": row[7]
+            })
+        return entries
+
+    def get_grammar_entry(self, entry_id: int) -> dict:
+        """Get a specific grammar book entry."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, title, content, language, tags, created_at, updated_at, collection_id
+            FROM grammar_book_entries
+            WHERE id = ?
+        """, (entry_id,))
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row[0],
+                "title": row[1],
+                "content": row[2],
+                "language": row[3],
+                "tags": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+                "collection_id": row[7]
+            }
+        return None
+
+    def update_grammar_entry(self, entry_id: int, title: str, content: str, language: str, tags: str) -> bool:
+        """Update an existing grammar book entry."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            UPDATE grammar_book_entries
+            SET title = ?, content = ?, language = ?, tags = ?, updated_at = ?
+            WHERE id = ?
+        """, (title, content, language, tags, datetime.now().isoformat(), entry_id))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_grammar_entry(self, entry_id: int) -> bool:
+        """Delete a grammar book entry."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM grammar_book_entries WHERE id = ?", (entry_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    # ===== WRITING SESSIONS METHODS =====
+
+    def add_writing_session(self, topic: str, user_writing: str, feedback: str, grade: str, study_language: str) -> int:
+        """Add a new writing session record."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (topic, user_writing, feedback, grade, study_language, datetime.now().isoformat()))
+        self.db.conn.commit()
+        return cursor.lastrowid
+
+    def get_writing_sessions(self, study_language: Optional[str] = None) -> List[Dict]:
+        """Get history of writing sessions."""
+        cursor = self.conn.cursor()
+        if study_language:
+            cursor.execute("SELECT * FROM writing_sessions WHERE study_language = ? ORDER BY created_at DESC", (study_language,))
+        else:
+            cursor.execute("SELECT * FROM writing_sessions ORDER BY created_at DESC")
+        
+        cols = [desc[0] for desc in cursor.description]
+        return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    # ===== CHAT METHODS =====
+
+    def create_chat_session(self, topic: str, study_language: str) -> int:
+        """Create a new chat session."""
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+        cursor.execute("""
+            INSERT INTO chat_sessions (cur_topic, study_language, created_at, last_updated)
+            VALUES (?, ?, ?, ?)
+        """, (topic, study_language, now, now))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_chat_sessions(self, study_language: Optional[str] = None) -> List[Dict]:
+        """Get list of chat sessions."""
+        cursor = self.conn.cursor()
+        if study_language:
+            cursor.execute("SELECT * FROM chat_sessions WHERE study_language = ? ORDER BY last_updated DESC", (study_language,))
+        else:
+            cursor.execute("SELECT * FROM chat_sessions ORDER BY last_updated DESC")
+        cols = [desc[0] for desc in cursor.description]
+        return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def add_chat_message(self, session_id: int, role: str, content: str, analysis: Optional[str] = None) -> int:
+        """Add a message to a chat session."""
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+        cursor.execute("""
+            INSERT INTO chat_messages (session_id, role, content, analysis, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (session_id, role, content, analysis, now))
+        
+        # Update session timestamp
+        cursor.execute("UPDATE chat_sessions SET last_updated = ? WHERE id = ?", (now, session_id))
+        
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_chat_messages(self, session_id: int) -> List[Dict]:
+        """Get all messages for a session."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC", (session_id,))
+        cols = [desc[0] for desc in cursor.description]
+        return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def delete_chat_session(self, session_id: int) -> bool:
+        """Delete a chat session."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
 
     def close(self):
         self.conn.close()

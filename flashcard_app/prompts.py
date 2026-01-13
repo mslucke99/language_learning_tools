@@ -35,12 +35,18 @@ WORD_PROMPTS = {
         'native_template': (
             'Provide 3 diverse example sentences for "{word}" in {native_language}. '
             '1. A simple statement. 2. A common question. 3. A sentence showing a unique grammatical property. '
-            'Highlight the word in **bold**.'
+            'Highlight the word in **bold**.\n\n'
+            '**Suggestions**: If any other words in these examples are likely to be difficult for a learner, '
+            'append a flashcard suggestion at the very end of your response for 1-2 of them in this format: '
+            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>'
         ),
         'study_template': (
             'Provide 3 simple sentences in {study_language} using "{word}". '
             'Include {native_language} translations. Use standard polite forms for Asian languages '
-            'unless specified otherwise. Highlight the word in **bold**.'
+            'unless specified otherwise. Highlight the word in **bold**.\n\n'
+            '**Suggestions**: If any other words in these examples are difficult, '
+            'append a flashcard suggestion at the very end in this format: '
+            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>'
         ),
     }
 }
@@ -54,7 +60,10 @@ SENTENCE_PROMPTS = {
             'In {language}, explain:\n'
             '1. **Morphology**: Break down complex words into roots, suffixes, or particles (especially important for Korean or Biblical languages).\n'
             '2. **Syntax**: Explain the word order or sentence structure.\n'
-            '3. **Key Rules**: Any specific grammar rules (tense, case, aspect) used here.'
+            '3. **Key Rules**: Any specific grammar rules (tense, case, aspect) used here.\n\n'
+            '**Suggestions**: If there is a distinct grammar pattern used (e.g., a specific conjugation rule or sentence structure pattern), '
+            'append a grammar suggestion at the very end in this format: '
+            '<grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>'
         ),
     },
     'vocabulary': {
@@ -90,7 +99,69 @@ SENTENCE_PROMPTS = {
             '1. **Translation**: A natural-sounding translation.\n'
             '2. **Literal Breakdown**: A word-for-word mapping if the grammar is very different.\n'
             '3. **Grammar & Vocab**: The most critical points to learn from this sentence.\n'
-            '4. **Usage Tip**: A practical tip on how to use these patterns elsewhere.'
+            '4. **Usage Tip**: A practical tip on how to use these patterns elsewhere.\n\n'
+            '**Suggestions**: \n'
+            '- If there is a distinct grammar pattern, append: <grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>\n'
+            '- If there is a difficult word worth studying separately, append: <flashcard word="TERM">BRIEF_DEFINITION</flashcard>'
+        ),
+    }
+}
+# Writing Composition Lab prompts
+WRITING_PROMPTS = {
+    'generate_topic': {
+        'name': 'Generate Topic',
+        'template': (
+            'Suggest a creative writing topic and a short background scenario for a language learner studying {study_language}. '
+            'The topic should be appropriate for their level and encourage the use of diverse vocabulary and grammar. '
+            'Provide the response in {native_language}.'
+        ),
+    },
+    'grade': {
+        'name': 'Grade & Feedback',
+        'template': (
+            'You are a professional language tutor. Grade the following writing in {study_language} about the topic "{topic}":\n\n'
+            '"{user_writing}"\n\n'
+            'Provide feedback in {native_language} covering:\n'
+            '1. **Overall Grade**: A descriptive grade (e.g., A, B+, Beginner, Intermediate).\n'
+            '2. **Strengths**: What did the user do well?\n'
+            '3. **Corrections**: Specific grammar or vocabulary mistakes with explanations.\n'
+            '4. **Natural Phrasing**: How would a native speaker say this more naturally?\n\n'
+            '**Suggestions**: \n'
+            '- If the user could benefit from learning a specific new word used in your feedback or relevant to the topic, '
+            'append: <flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n'
+            '- If there is a grammar pattern they should learn or that they misused, '
+            'append: <grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>'
+        ),
+    }
+}
+
+# Interactive Chat prompts
+CHAT_PROMPTS = {
+    'system_roleplay': {
+        'name': 'Roleplay & Analysis',
+        'template': (
+            'You are a friendly language tutor roleplaying as "{persona}" in {study_language}.\n'
+            'Your goal is to have a natural conversation with the user in {study_language} while analyzing their language usage.\n'
+            'Strictly follow this XML output format:\n\n'
+            '<reply>\n'
+            '  (Write your natural, in-character response here in {study_language}.)\n'
+            '</reply>\n'
+            '<feedback>\n'
+            '  (Provide corrections and feedback on the user\'s *last* message in {native_language}. '
+            'Be encouraging but precise.)\n'
+            '</feedback>\n'
+            '<vocab>\n'
+            '  (List new words from YOUR reply or the user\'s message that are worth studying. '
+            'Format: <flashcard word="TERM">DEFINITION</flashcard>)\n'
+            '</vocab>\n'
+            '<grammar>\n'
+            '  (Explain any key grammar patterns used in the conversation. '
+            'Format: <grammar_pattern title="PATTERN">EXPLANATION</grammar_pattern>)\n'
+            '</grammar>\n\n'
+            'Topic: {topic}\n'
+            'User Native Language: {native_language}\n'
+            'Target Language: {study_language}\n'
+            'Begin the conversation or continue it naturally.'
         ),
     }
 }
