@@ -1,4 +1,5 @@
 import sqlite3
+import uuid
 from src.features.flashcards.logic.flashcard import Flashcard
 from datetime import datetime
 from typing import Optional, List, Dict
@@ -247,6 +248,29 @@ class FlashcardDatabase:
                 FOREIGN KEY (attempt_id) REFERENCES exam_attempts (id) ON DELETE CASCADE
             )
         """)
+        # Create pending_sync_actions table for mobile-initiated actions
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pending_sync_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action_type TEXT NOT NULL,
+                target_table TEXT,
+                target_id INTEGER,
+                payload TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                processed_at TEXT
+            )
+        """)
+
+        # Create sync_metadata table for tracking sync state
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sync_metadata (
+                id INTEGER PRIMARY KEY,
+                last_pc_sync TEXT,
+                last_mobile_sync TEXT,
+                sync_version INTEGER DEFAULT 1
+            )
+        """)
 
         # Migration: Add collection_id to existing tables
         self._migrate_schema()
@@ -287,6 +311,62 @@ class FlashcardDatabase:
             if column not in columns:
                 print(f"[DB] Migrating table {table}: adding {column}")
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+
+        # 3. User notes migrations for mobile annotation support
+        migrations_user_notes = [
+            "flashcards",
+            "writing_sessions",
+            "chat_sessions"
+        ]
+        
+        for table in migrations_user_notes:
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = [info[1] for info in cursor.fetchall()]
+            
+            if 'user_notes' not in columns:
+                print(f"[DB] Migrating table {table}: adding user_notes")
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN user_notes TEXT")
+
+        # 4. Sync hardening migrations (UUIDs, timestamps, soft deletes)
+        sync_hardening_tables = [
+            "decks", "flashcards", "imported_content", "writing_sessions", 
+            "chat_sessions", "word_definitions", "sentence_explanations", 
+            "grammar_book_entries", "collections"
+        ]
+        
+        for table in sync_hardening_tables:
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = [info[1] for info in cursor.fetchall()]
+            
+            # Add uuid
+            if 'uuid' not in columns:
+                print(f"[DB] Migrating table {table}: adding uuid")
+                # SQLite limitation: Cannot add UNIQUE column via ALTER TABLE if table has data
+                # Workaround: Add column -> Backfill -> Create Unique Index
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN uuid TEXT")
+                
+                # Backfill UUIDs for existing rows
+                cursor.execute(f"SELECT id FROM {table} WHERE uuid IS NULL")
+                rows = cursor.fetchall()
+                for row_id in rows:
+                    new_uuid = str(uuid.uuid4())
+                    cursor.execute(f"UPDATE {table} SET uuid = ? WHERE id = ?", (new_uuid, row_id[0]))
+                
+                # Create Unique Index
+                cursor.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{table}_uuid ON {table}(uuid)")
+            
+            # Add last_modified
+            if 'last_modified' not in columns:
+                print(f"[DB] Migrating table {table}: adding last_modified")
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN last_modified TEXT")
+                # Backfill with current time
+                now = datetime.now().isoformat()
+                cursor.execute(f"UPDATE {table} SET last_modified = ? WHERE last_modified IS NULL", (now,))
+            
+            # Add deleted_at (for soft deletes)
+            if 'deleted_at' not in columns:
+                print(f"[DB] Migrating table {table}: adding deleted_at")
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT")
 
         self.conn.commit()
 
@@ -962,6 +1042,61 @@ class FlashcardDatabase:
         """Delete settings matching a LIKE pattern."""
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM study_settings WHERE setting_key LIKE ?", (pattern,))
+        self.conn.commit()
+
+    # --- Sync Support Methods ---
+    
+    def add_pending_action(self, action_type: str, target_table: str = None, 
+                          target_id: int = None, payload: str = None) -> int:
+        """Add a pending sync action (for mobile-initiated requests)."""
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+        cursor.execute("""
+            INSERT INTO pending_sync_actions (action_type, target_table, target_id, payload, status, created_at)
+            VALUES (?, ?, ?, ?, 'pending', ?)
+        """, (action_type, target_table, target_id, payload, now))
+        self.conn.commit()
+        return cursor.lastrowid
+    
+    def get_pending_actions(self, status: str = 'pending') -> List[Dict]:
+        """Get pending sync actions by status."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM pending_sync_actions WHERE status = ? ORDER BY created_at", (status,))
+        cols = [desc[0] for desc in cursor.description]
+        return [dict(zip(cols, row)) for row in cursor.fetchall()]
+    
+    def update_action_status(self, action_id: int, status: str):
+        """Update status of a pending action."""
+        cursor = self.conn.cursor()
+        processed_at = datetime.now().isoformat() if status in ('completed', 'failed') else None
+        cursor.execute("""
+            UPDATE pending_sync_actions SET status = ?, processed_at = ? WHERE id = ?
+        """, (status, processed_at, action_id))
+        self.conn.commit()
+    
+    def get_sync_metadata(self) -> Dict:
+        """Get sync metadata (last sync times, version)."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM sync_metadata WHERE id = 1")
+        row = cursor.fetchone()
+        if row:
+            cols = [desc[0] for desc in cursor.description]
+            return dict(zip(cols, row))
+        return {'id': 1, 'last_pc_sync': None, 'last_mobile_sync': None, 'sync_version': 1}
+    
+    def update_sync_metadata(self, pc_sync: bool = False, mobile_sync: bool = False):
+        """Update sync timestamp for PC or mobile."""
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+        
+        # Ensure row exists
+        cursor.execute("INSERT OR IGNORE INTO sync_metadata (id, sync_version) VALUES (1, 1)")
+        
+        if pc_sync:
+            cursor.execute("UPDATE sync_metadata SET last_pc_sync = ? WHERE id = 1", (now,))
+        if mobile_sync:
+            cursor.execute("UPDATE sync_metadata SET last_mobile_sync = ? WHERE id = 1", (now,))
+        
         self.conn.commit()
 
     def close(self):

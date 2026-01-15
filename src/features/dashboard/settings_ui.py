@@ -4,6 +4,8 @@ from src.features.study_center.logic.study_manager import StudyManager
 from src.core.ui_utils import setup_standard_header
 from src.features.dashboard.prompt_editor_ui import PromptEditorDialog
 from src.core.localization import tr, set_locale
+from src.services.cloud_sync import CloudSyncManager, CONFIG_DIR
+import os
 
 class SettingsFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager):
@@ -13,6 +15,10 @@ class SettingsFrame(ttk.Frame):
         
         self.ollama_available = study_manager.ollama_client is not None and study_manager.ollama_client.is_available()
         self.available_models = []
+        
+        # Initialize CloudSyncManager
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'flashcards.db')
+        self.cloud_sync = CloudSyncManager(db_path)
         
         self.setup_ui()
         self.load_settings()
@@ -103,6 +109,49 @@ class SettingsFrame(ttk.Frame):
         ttk.Label(prompt_tab, text="Tip: Use the editor to add specific instructions for your target language or to change the tone of the AI tutor.", 
                   font=("Arial", 9, "italic"), foreground="gray", wraplength=500).pack(anchor="w", pady=20)
         
+        # --- TAB 4: CLOUD SYNC ---
+        sync_tab = ttk.Frame(self.notebook, padding="20")
+        self.notebook.add(sync_tab, text="☁️ Cloud Sync")
+        
+        ttk.Label(sync_tab, text="Google Drive Sync", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(sync_tab, text="Sync your data with Google Drive for use across devices.", 
+                  wraplength=500, justify="left").pack(anchor="w", pady=(0, 15))
+        
+        # Status indicator
+        self.sync_status_var = tk.StringVar(value="Not connected")
+        status_frame = ttk.Frame(sync_tab)
+        status_frame.pack(fill="x", pady=(0, 15))
+        ttk.Label(status_frame, text="Status:").pack(side="left")
+        ttk.Label(status_frame, textvariable=self.sync_status_var, font=("Arial", 10, "bold")).pack(side="left", padx=10)
+        
+        # Connect button
+        connect_frame = ttk.Frame(sync_tab)
+        connect_frame.pack(fill="x", pady=5)
+        ttk.Button(connect_frame, text="🔗 Connect Google Account", 
+                   command=self._connect_google).pack(side="left")
+        ttk.Button(connect_frame, text="Disconnect", 
+                   command=self._disconnect_google).pack(side="left", padx=5)
+        ttk.Button(connect_frame, text="🔑 Manage Credentials", 
+                   command=self._open_credentials_manager).pack(side="left", padx=5)
+        
+        # Sync actions
+        ttk.Separator(sync_tab, orient="horizontal").pack(fill="x", pady=20)
+        ttk.Label(sync_tab, text="Manual Sync Actions", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 10))
+        
+        action_frame = ttk.Frame(sync_tab)
+        action_frame.pack(fill="x", pady=10)
+        
+        ttk.Button(action_frame, text="⬆️ Backup to Cloud", 
+                   command=self._backup_to_cloud, width=20).pack(side="left", padx=5)
+        ttk.Button(action_frame, text="⬇️ Restore from Cloud", 
+                   command=self._restore_from_cloud, width=20).pack(side="left", padx=5)
+        
+        ttk.Label(sync_tab, text="⚠️ Backup will overwrite the cloud copy. Restore will overwrite your local data.", 
+                  font=("Arial", 9, "italic"), foreground="#CC5500", wraplength=500).pack(anchor="w", pady=15)
+        
+        ttk.Label(sync_tab, text=f"Credentials folder: {CONFIG_DIR}", 
+                  font=("Arial", 8), foreground="gray").pack(anchor="w", pady=(20, 0))
+        
         # --- FOOTER: SAVE BUTTON ---
         footer = ttk.Frame(self, padding=20)
         footer.pack(fill="x")
@@ -155,3 +204,74 @@ class SettingsFrame(ttk.Frame):
             self.go_back()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save settings: {e}")
+    
+    # --- Cloud Sync Methods ---
+    def _open_credentials_manager(self):
+        from src.features.cloud_sync.credentials_dialog import CredentialsManagerDialog
+        
+        def on_update():
+            # Refresh connection status if needed
+            if self.cloud_sync.is_authenticated():
+                self.sync_status_var.set("Connected ✅")
+            else:
+                self.sync_status_var.set("Not connected")
+
+        CredentialsManagerDialog(self.winfo_toplevel(), self.cloud_sync, on_update)
+
+    def _connect_google(self):
+        if not self.cloud_sync.is_available():
+            messagebox.showerror("Error", "Google API libraries not installed.\nRun: pip install -r requirements.txt")
+            return
+        
+        if not self.cloud_sync.has_credentials_file():
+            res = messagebox.askyesno("Missing Credentials", 
+                "No credentials.json found.\nWould you like to open the Credentials Manager to import it?")
+            if res:
+                self._open_credentials_manager()
+            return
+        
+        success, message = self.cloud_sync.authenticate()
+        if success:
+            self.sync_status_var.set("Connected ✅")
+            messagebox.showinfo("Success", message)
+        else:
+            self.sync_status_var.set("Connection failed ❌")
+            messagebox.showerror("Error", message)
+    
+    def _disconnect_google(self):
+        self.cloud_sync.disconnect()
+        self.sync_status_var.set("Not connected")
+        messagebox.showinfo("Disconnected", "Google account disconnected.")
+    
+    def _backup_to_cloud(self):
+        if not self.cloud_sync.is_authenticated():
+            messagebox.showwarning("Not Connected", "Please connect your Google account first.")
+            return
+        
+        confirm = messagebox.askyesno("Confirm Backup", 
+            "This will REPLACE your cloud backup with local data.\n\nProceed?")
+        if not confirm:
+            return
+        
+        success, message = self.cloud_sync.backup_to_cloud()
+        if success:
+            messagebox.showinfo("Backup Complete", message)
+        else:
+            messagebox.showerror("Backup Failed", message)
+    
+    def _restore_from_cloud(self):
+        if not self.cloud_sync.is_authenticated():
+            messagebox.showwarning("Not Connected", "Please connect your Google account first.")
+            return
+        
+        confirm = messagebox.askyesno("Confirm Restore", 
+            "This will REPLACE your local data with the cloud backup.\n\n" +
+            "A backup of your current local data will be saved as flashcards.db.backup.\n\nProceed?")
+        if not confirm:
+            return
+        
+        success, message = self.cloud_sync.restore_from_cloud()
+        if success:
+            messagebox.showinfo("Restore Complete", message + "\n\nPlease restart the application.")
+        else:
+            messagebox.showerror("Restore Failed", message)
