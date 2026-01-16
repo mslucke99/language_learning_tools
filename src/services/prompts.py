@@ -38,7 +38,17 @@ WORD_PROMPTS = {
             'Highlight the word in **bold**.\n\n'
             '**Suggestions**: If any other words in these examples are likely to be difficult for a learner, '
             'append a flashcard suggestion at the very end of your response for 1-2 of them in this format: '
-            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>'
+            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n\n'
+            '**Example 1 (with suggestions):**\n'
+            '1. The **ephemeral** beauty of cherry blossoms captivates visitors.\n'
+            '2. Is this feeling **ephemeral** or lasting?\n'
+            '3. Their **ephemeral** success faded quickly.\n\n'
+            '<flashcard word="captivates">To attract and hold interest</flashcard>\n\n'
+            '**Example 2 (no suggestions - basic words):**\n'
+            '1. I **walk** to school every day.\n'
+            '2. Do you **walk** or take the bus?\n'
+            '3. They **walk** together in the park.\n'
+            '(No suggestions needed - common vocabulary)'
         ),
         'study_template': (
             'Provide 3 simple sentences in {study_language} using "{word}". '
@@ -46,7 +56,17 @@ WORD_PROMPTS = {
             'unless specified otherwise. Highlight the word in **bold**.\n\n'
             '**Suggestions**: If any other words in these examples are difficult, '
             'append a flashcard suggestion at the very end in this format: '
-            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>'
+            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n\n'
+            '**Example 1 (with suggestion):**\n'
+            '1. **사과**를 먹어요. (I eat an apple.)\n'
+            '2. 이 **사과**는 빨개요. (This apple is red.)\n'
+            '3. **사과**가 맛있어요. (The apple is delicious.)\n\n'
+            '<flashcard word="빨개요">To be red (adjective form)</flashcard>\n\n'
+            '**Example 2 (no suggestions - basic words):**\n'
+            '1. Yo **como** pan. (I eat bread.)\n'
+            '2. ¿Tú **comes** frutas? (Do you eat fruits?)\n'
+            '3. Ellos **comen** en casa. (They eat at home.)\n'
+            '(No suggestions - "comer" conjugations are fundamental)'
         ),
     }
 }
@@ -63,7 +83,23 @@ SENTENCE_PROMPTS = {
             '3. **Key Rules**: Any specific grammar rules (tense, case, aspect) used here.\n\n'
             '**Suggestions**: If there is a distinct grammar pattern used (e.g., a specific conjugation rule or sentence structure pattern), '
             'append a grammar suggestion at the very end in this format: '
-            '<grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>'
+            '<grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>\n\n'
+            '**Example 1 (with grammar pattern):**\n'
+            '**Morphology**: 먹 (eat) + 고 (and) + 싶다 (want to)\n'
+            '**Syntax**: Subject + Object + Verb-고 싶다 pattern\n'
+            '**Key Rules**: The -고 싶다 pattern expresses desire to do an action.\n\n'
+            '<grammar_pattern title="-고 싶다 Pattern">Attach -고 싶다 to verb stems to express "I want to [verb]"</grammar_pattern>\n\n'
+            '**Example 2 (complex - with both):**\n'
+            '**Morphology**: 친구 (friend) + 가 (subject) + 준 (gave-past) + 책 (book)\n'
+            '**Syntax**: Relative clause "친구가 준" modifies "책"\n'
+            '**Key Rules**: Past tense modifier -(으)ㄴ creates relative clauses.\n\n'
+            '<grammar_pattern title="Relative Clauses">Use verb stem + -(으)ㄴ/는 to modify nouns</grammar_pattern>\n'
+            '<flashcard word="주다">To give</flashcard>\n\n'
+            '**Example 3 (simple - no suggestions):**\n'
+            '**Morphology**: Simple present tense\n'
+            '**Syntax**: Standard SVO order\n'
+            '**Key Rules**: Basic present tense conjugation\n'
+            '(No suggestions - fundamental grammar)'
         ),
     },
     'vocabulary': {
@@ -102,7 +138,14 @@ SENTENCE_PROMPTS = {
             '4. **Usage Tip**: A practical tip on how to use these patterns elsewhere.\n\n'
             '**Suggestions**: \n'
             '- If there is a distinct grammar pattern, append: <grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>\n'
-            '- If there is a difficult word worth studying separately, append: <flashcard word="TERM">BRIEF_DEFINITION</flashcard>'
+            '- If there is a difficult word worth studying separately, append: <flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n\n'
+            '**Example Output:**\n'
+            '**Translation**: "I want to go to the library."\n'
+            '**Literal Breakdown**: 나는 (I) + 도서관에 (to library) + 가고 싶어요 (want to go)\n'
+            '**Grammar & Vocab**: Uses -고 싶다 pattern for expressing desire. 도서관 means library.\n'
+            '**Usage Tip**: Replace 가다 with any verb to express "want to [verb]".\n\n'
+            '<grammar_pattern title="-고 싶다 Desire Pattern">Attach to verb stems: 먹고 싶다 (want to eat), 자고 싶다 (want to sleep)</grammar_pattern>\n'
+            '<flashcard word="도서관">Library</flashcard>'
         ),
     }
 }
@@ -130,7 +173,16 @@ WRITING_PROMPTS = {
             '- If the user could benefit from learning a specific new word used in your feedback or relevant to the topic, '
             'append: <flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n'
             '- If there is a grammar pattern they should learn or that they misused, '
-            'append: <grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>'
+            'append: <grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>\n\n'
+            '**Example Output:**\n'
+            '**Overall Grade**: B+ (Intermediate)\n\n'
+            '**Strengths**: Good vocabulary variety, clear topic sentences, nice use of connectors.\n\n'
+            '**Corrections**:\n'
+            '- "나는 학교에 갔어요" → In casual writing, the subject is often omitted: "학교에 갔어요"\n'
+            '- "재미있었어요" is correct, but "즐거웠어요" sounds more natural for personal experiences\n\n'
+            '**Natural Phrasing**: Instead of "나는 친구와 놀았어요", try "친구랑 놀았어요" (랑 is more casual than 와)\n\n'
+            '<grammar_pattern title="Subject Omission in Korean">Korean often omits obvious subjects in casual speech and writing</grammar_pattern>\n'
+            '<flashcard word="즐겁다">To be enjoyable/pleasant (experience-focused, more natural than 재미있다 for personal experiences)</flashcard>'
         ),
     }
 }
@@ -158,10 +210,44 @@ CHAT_PROMPTS = {
             '  (Explain any key grammar patterns used in the conversation. '
             'Format: <grammar_pattern title="PATTERN">EXPLANATION</grammar_pattern>)\n'
             '</grammar>\n\n'
+            '**Example Conversation:**\n'
+            'User: "안녕하세요! 오늘 날씨가 좋아요."\n\n'
+            '<reply>\n'
+            '네, 정말 좋네요! 산책하기 딱 좋은 날씨예요. 주말에 뭐 하실 거예요?\n'
+            '</reply>\n'
+            '<feedback>\n'
+            'Great use of 좋아요! Small tip: "날씨가 좋아요" is perfect. You could also say "날씨가 좋네요" for a more observational, gentle tone.\n'
+            '</feedback>\n'
+            '<vocab>\n'
+            '<flashcard word="산책">A walk, stroll</flashcard>\n'
+            '<flashcard word="딱">(Adverb) Exactly, just right</flashcard>\n'
+            '</vocab>\n'
+            '<grammar>\n'
+            '<grammar_pattern title="-네요 Ending">Expresses mild surprise or realization. More gentle/observational than -아요/어요.</grammar_pattern>\n'
+            '</grammar>\n\n'
             'Topic: {topic}\n'
             'User Native Language: {native_language}\n'
             'Target Language: {study_language}\n'
             'Begin the conversation or continue it naturally.'
+        ),
+    }
+}
+# Exam Practice prompts
+EXAM_PROMPTS = {
+    'generate_question': {
+        'name': 'Generate Exam Question',
+        'template': (
+            'You are an expert examiner for the {exam_name} ({level}) language exam. '
+            'Generate a realistic multiple-choice question for the {section} section. '
+            'The question must follow the exact difficulty and style of the real exam.\n\n'
+            'Strictly provide the response in this JSON format:\n'
+            '{{\n'
+            '  "question": "The question text",\n'
+            '  "options": ["Option A", "Option B", "Option C", "Option D"],\n'
+            '  "correct_answer": "The exact string of the correct option",\n'
+            '  "explanation": "Briefly explain why this is the correct answer in {native_language}"\n'
+            '}}\n\n'
+            '**Context**: Target language is {study_language}. Focus on {focus_area}.'
         ),
     }
 }

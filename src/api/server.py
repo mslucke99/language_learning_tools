@@ -4,8 +4,8 @@ Provides endpoints for browser extension and external integrations
 """
 
 from flask import Flask, request, jsonify
-from database import FlashcardDatabase
-from ollama_integration import get_ollama_client, is_ollama_available
+from src.core.database import FlashcardDatabase
+from src.services.llm_service import get_ollama_client, is_ollama_available
 import json
 from datetime import datetime
 
@@ -35,8 +35,9 @@ def health():
 def get_decks():
     """Get all decks."""
     try:
-        print('[API] GET /decks - fetching all decks', flush=True)
-        decks = db.get_all_decks()
+        language = request.args.get('language')
+        print(f'[API] GET /decks - fetching all decks (language={language})', flush=True)
+        decks = db.get_all_decks(language=language)
         print(f'[API] Found {len(decks)} decks', flush=True)
         return jsonify({"success": True, "decks": decks})
     except Exception as e:
@@ -52,11 +53,12 @@ def create_deck():
         data = request.json
         name = data.get('name', '').strip()
         description = data.get('description', '').strip()
+        language = data.get('language')
         
         if not name:
             return jsonify({"success": False, "error": "Deck name is required"}), 400
         
-        deck_id = db.create_deck(name, description)
+        deck_id = db.create_deck(name, description, language=language)
         if deck_id:
             return jsonify({"success": True, "deck_id": deck_id, "name": name})
         else:
@@ -68,7 +70,7 @@ def create_deck():
 def get_deck(deck_id):
     """Get deck details and statistics."""
     try:
-        decks = db.get_all_decks()
+        decks = db.get_all_decks() # TODO: Optimize to get single deck
         deck = next((d for d in decks if d['id'] == deck_id), None)
         
         if not deck:
@@ -338,11 +340,12 @@ def get_imported_content():
         limit = int(request.args.get('limit', 50))
         offset = int(request.args.get('offset', 0))
         content_type = request.args.get('type', None)
+        language = request.args.get('language', None)
         
         if content_type:
-            content = db.get_imported_content_by_type(content_type)
+            content = db.get_imported_content_by_type(content_type, language=language)
         else:
-            content = db.get_imported_content(limit, offset)
+            content = db.get_imported_content(limit, offset, language=language)
         
         return jsonify({"success": True, "content": content})
     except Exception as e:
@@ -432,7 +435,8 @@ def mark_content_processed(content_id):
 def get_imported_stats():
     """Get statistics about imported content."""
     try:
-        stats = db.get_imported_content_stats()
+        language = request.args.get('language', None)
+        stats = db.get_imported_content_stats(language=language)
         return jsonify({"success": True, "stats": stats})
     except Exception as e:
         print(f'[API] Error getting imported stats: {str(e)}', flush=True)
