@@ -4,8 +4,8 @@ Provides endpoints for browser extension and external integrations
 """
 
 from flask import Flask, request, jsonify
-from database import FlashcardDatabase
-from ollama_integration import get_ollama_client, is_ollama_available
+from src.core.database import FlashcardDatabase
+from src.services.llm_service import get_ollama_client, is_ollama_available
 import json
 from datetime import datetime
 

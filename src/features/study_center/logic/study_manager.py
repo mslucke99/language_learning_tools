@@ -17,9 +17,9 @@ import time
 import re
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
-from database import FlashcardDatabase
-from ollama_integration import OllamaClient, OllamaThreadedQuery
-from prompts import WORD_PROMPTS, SENTENCE_PROMPTS, WRITING_PROMPTS, CHAT_PROMPTS
+from src.core.database import FlashcardDatabase
+from src.services.llm_service import OllamaClient, OllamaThreadedQuery
+from src.services.prompts import WORD_PROMPTS, SENTENCE_PROMPTS, WRITING_PROMPTS, CHAT_PROMPTS
 
 
 class StudyManager:
@@ -52,13 +52,58 @@ class StudyManager:
         # Background Task Queue Setup
         self.task_queue = queue.Queue()
         self.processing_results = {} # task_id -> {status, result}
+        self.active_tasks = {} # task_id -> task_info
+        self.debug_logs = [] # list of {timestamp, type, prompt, raw_response, duration}
         self.stop_worker = False
         
         # Start worker thread
         self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.worker_thread.start()
         
-    def queue_generation_task(self, task_type: str, item_id: int, **kwargs) -> str:
+        # Load default prompt templates from src/services/prompts.py
+        from src.services import prompts
+        self.default_prompts = {
+            'word': prompts.WORD_PROMPTS,
+            'sentence': prompts.SENTENCE_PROMPTS,
+            'writing': prompts.WRITING_PROMPTS,
+            'chat': prompts.CHAT_PROMPTS
+        }
+
+    # ===== PROMPT MANAGEMENT =====
+
+    def get_custom_prompt(self, category: str, prompt_id: str, template_type: str = 'template') -> str:
+        """Get a custom prompt from the database if it exists, otherwise return default."""
+        key = f"prompt:{category}:{prompt_id}:{template_type}"
+        custom = self.db.get_setting(key)
+        if custom:
+            return custom
+        
+        # Fallback to default
+        cat_prompts = self.default_prompts.get(category, {})
+        entry = cat_prompts.get(prompt_id, {})
+        if isinstance(entry, dict):
+            return entry.get(template_type, "")
+        return ""
+
+    def set_custom_prompt(self, category: str, prompt_id: str, template_type: str, value: str):
+        """Save a custom prompt to the database."""
+        key = f"prompt:{category}:{prompt_id}:{template_type}"
+        self.db.update_setting(key, value)
+
+    def reset_prompt(self, category: str, prompt_id: str, template_type: str):
+        """Remove a custom prompt, reverting to default."""
+        key = f"prompt:{category}:{prompt_id}:{template_type}"
+        self.db.delete_setting(key)
+
+    def reset_all_prompts(self):
+        """Remove all custom prompts."""
+        self.db.clear_settings_pattern("prompt:%")
+
+    def _get_effective_prompt(self, category: str, prompt_id: str, template_type: str = 'template') -> str:
+        """Internal helper to get the prompt to use for generation."""
+        return self.get_custom_prompt(category, prompt_id, template_type)
+
+    # ===== QUEUE MANAGEMENT =====
         """
         Queue a generation task.
         
@@ -71,7 +116,12 @@ class StudyManager:
             task_id: Unique ID for tracking the task
         """
         task_id = f"{task_type}_{item_id}_{int(time.time()*1000)}"
-        self.processing_results[task_id] = {'status': 'queued'}
+        self.processing_results[task_id] = {
+            'status': 'queued',
+            'type': task_type,
+            'item_id': item_id,
+            'description': self._get_task_description(task_type, item_id, kwargs)
+        }
         
         task = {
             'id': task_id,
@@ -90,8 +140,73 @@ class StudyManager:
         """Get overall queue status."""
         return {
             'queued': self.task_queue.qsize(),
-            'results': len(self.processing_results)
+            'active': len(self.active_tasks),
+            'completed': sum(1 for r in self.processing_results.values() if r['status'] == 'completed'),
+            'failed': sum(1 for r in self.processing_results.values() if r['status'] == 'failed'),
+            'active_info': list(self.active_tasks.values()),
+            'debug_logs_count': len(self.debug_logs)
         }
+
+    def _log_debug(self, task_type: str, prompt: str, raw_response: str, duration: float, description: str = '', error: str = None):
+        """Log a debug interaction."""
+        self.debug_logs.append({
+            'timestamp': datetime.now().strftime("%H:%M:%S"),
+            'type': task_type,
+            'description': description or task_type,
+            'prompt': prompt,
+            'raw_response': raw_response,
+            'duration': f"{duration:.2f}s",
+            'error': error
+        })
+        # Keep last 100 logs
+        if len(self.debug_logs) > 100:
+            self.debug_logs.pop(0)
+
+    def get_debug_logs(self) -> List[Dict]:
+        """Get all captured debug logs."""
+        return self.debug_logs
+
+    def _get_task_description(self, task_type: str, item_id: int, kwargs: dict) -> str:
+        """Get a friendly description for a task."""
+        try:
+            if task_type in ['definition', 'explanation', 'examples']:
+                cursor = self.db.conn.cursor()
+                cursor.execute("SELECT content FROM imported_content WHERE id = ?", (item_id,))
+                row = cursor.fetchone()
+                word = row[0] if row else f"Word #{item_id}"
+                type_map = {'definition': 'Defining', 'explanation': 'Explaining', 'examples': 'Examples for'}
+                return f"{type_map.get(task_type, 'Processing')} '{word}'"
+                
+            elif task_type == 'sentence_explanation':
+                cursor = self.db.conn.cursor()
+                cursor.execute("SELECT content FROM imported_content WHERE id = ?", (item_id,))
+                row = cursor.fetchone()
+                if row:
+                    content = row[0]
+                    short = content[:30] + "..." if len(content) > 33 else content
+                    return f"Explaining sentence: \"{short}\""
+                return f"Explaining sentence #{item_id}"
+                
+            elif task_type == 'grammar_explanation':
+                cursor = self.db.conn.cursor()
+                cursor.execute("SELECT title FROM grammar_book_entries WHERE id = ?", (item_id,))
+                row = cursor.fetchone()
+                title = row[0] if row else f"Grammar #{item_id}"
+                return f"Explaining grammar: {title}"
+                
+            elif task_type == 'grade_writing':
+                topic = kwargs.get('topic', 'Composition')
+                return f"Grading writing: {topic}"
+                
+            elif task_type == 'writing_topic':
+                return "Generating new writing topic"
+                
+            elif task_type == 'chat_message':
+                return "Generating AI chat response"
+        except:
+            pass
+            
+        return f"{task_type.replace('_', ' ').capitalize()} for item {item_id}"
         
     def _worker_loop(self):
         """Background worker to process tasks."""
@@ -103,15 +218,30 @@ class StudyManager:
                 continue
                 
             task_id = task['id']
+            task_type = task['type']
+            item_id = task['item_id']
+            kwargs = task['kwargs']
+            
             self.processing_results[task_id]['status'] = 'processing'
+            self.active_tasks[task_id] = {
+                'id': task_id,
+                'type': task_type,
+                'item_id': item_id,
+                'start_time': time.time(),
+                'description': self._get_task_description(task_type, item_id, kwargs)
+            }
             
             try:
-                task_type = task['type']
-                item_id = task['item_id']
-                kwargs = task['kwargs']
-                
+                start_time = time.time()
                 success = False
                 result = None
+                
+                # We need to capture the prompt before sending. 
+                # This requires refactoring generation methods to return (success, result, suggestions, prompt, raw_response)
+                # For now, we'll instrument a few key ones.
+                
+                # Placeholder for simplified logging if we don't want to refactor all return signatures yet
+                # We'll stick to basic logging inside the methods for now to keep this edit focused.
                 
                 # Process based on type
                 suggestions = {}
@@ -131,6 +261,10 @@ class StudyManager:
                 elif task_type == 'writing_topic':
                     success, result, suggestions = self.generate_writing_topic()
                 elif task_type == 'chat_message':
+                    # Fetch current history for context
+                    session_id = kwargs.get('session_id')
+                    if session_id:
+                        kwargs['current_history'] = self.get_chat_messages(session_id)
                     success, result, suggestions = self.send_chat_message(**kwargs)
                 else:
                     success, result, suggestions = False, "Unknown task type", {}
@@ -151,6 +285,8 @@ class StudyManager:
                     'suggestions': {}
                 }
             finally:
+                if task_id in self.active_tasks:
+                    del self.active_tasks[task_id]
                 self.task_queue.task_done()
                 
     def batch_generate_sentences(self) -> int:
@@ -253,82 +389,6 @@ class StudyManager:
             return self.ollama_client.get_available_models()
         return []
     
-    # ========== PROMPT MANAGEMENT ==========
-    
-    def get_word_prompt(self, prompt_type: str, language: str = 'native') -> str:
-        """
-        Get word generation prompt (custom or default).
-        
-        Args:
-            prompt_type: 'definition', 'explanation', or 'examples'
-            language: 'native' or 'study'
-            
-        Returns:
-            The prompt template
-        """
-        # Check for custom prompt
-        custom_key = f'word_prompt_{prompt_type}_{language}'
-        custom = self._get_setting(custom_key, '')
-        
-        if custom:
-            return custom
-        
-        # Use default
-        if prompt_type in WORD_PROMPTS:
-            if language == 'native':
-                return WORD_PROMPTS[prompt_type]['native_template']
-            else:
-                return WORD_PROMPTS[prompt_type]['study_template']
-        
-        return f"Generate a {prompt_type} for the word: {{word}}"
-    
-    def set_word_prompt(self, prompt_type: str, language: str, prompt: str):
-        """Set custom word generation prompt."""
-        key = f'word_prompt_{prompt_type}_{language}'
-        self._set_setting(key, prompt)
-    
-    def get_sentence_prompt(self, focus_area: str) -> str:
-        """
-        Get sentence explanation prompt (custom or default).
-        
-        Args:
-            focus_area: 'grammar', 'vocabulary', 'context', 'pronunciation', or 'all'
-            
-        Returns:
-            The prompt template
-        """
-        # Check for custom prompt
-        custom_key = f'sentence_prompt_{focus_area}'
-        custom = self._get_setting(custom_key, '')
-        
-        if custom:
-            return custom
-        
-        # Use default
-        if focus_area in SENTENCE_PROMPTS:
-            return SENTENCE_PROMPTS[focus_area]['template']
-        
-        return f"Explain this sentence focusing on {focus_area}: {{sentence}}"
-    
-    def set_sentence_prompt(self, focus_area: str, prompt: str):
-        """Set custom sentence explanation prompt."""
-        key = f'sentence_prompt_{focus_area}'
-        self._set_setting(key, prompt)
-    
-    def get_default_word_prompt(self, prompt_type: str, language: str) -> str:
-        """Get the default prompt for a word type (for display in UI)."""
-        if prompt_type in WORD_PROMPTS:
-            if language == 'native':
-                return WORD_PROMPTS[prompt_type]['native_template']
-            else:
-                return WORD_PROMPTS[prompt_type]['study_template']
-        return ""
-    
-    def get_default_sentence_prompt(self, focus_area: str) -> str:
-        """Get the default prompt for a sentence focus area (for display in UI)."""
-        if focus_area in SENTENCE_PROMPTS:
-            return SENTENCE_PROMPTS[focus_area]['template']
-        return ""
     
     # ========== IMPORTED CONTENT RETRIEVAL ==========
     
@@ -471,7 +531,17 @@ class StudyManager:
         
         row = cursor.fetchone()
         if not row:
-            return None
+            # Fallback: if preferred language not found, try to get ANY definition for this word
+            cursor.execute("""
+                SELECT id, word, definition, definition_language, created_at, last_updated, 
+                       examples, notes, difficulty_level, source
+                FROM word_definitions
+                WHERE imported_content_id = ?
+                LIMIT 1
+            """, (imported_content_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
         
         return {
             'id': row[0],
@@ -578,12 +648,19 @@ class StudyManager:
         
         # Get the appropriate prompt
         target_lang = self.native_language if language == 'native' else self.study_language
-        prompt_template = self.get_word_prompt(content_type, language)
+        template_type = 'native_template' if language == 'native' else 'study_template'
+        prompt_template = self._get_effective_prompt('word', content_type, template_type)
         prompt = prompt_template.format(word=word, native_language=self.native_language, study_language=self.study_language)
         
         # Generate using Ollama
         try:
+            start_time = time.time()
             content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            duration = time.time() - start_time
+            
+            desc = f"Word {content_type}: '{word}'"
+            self._log_debug('word_generation', prompt, content or "EMPTY", duration, description=desc)
+            
             if content:
                 # Parse for structured output
                 clean_content, suggestions = self._parse_ai_response(content)
@@ -599,6 +676,8 @@ class StudyManager:
             else:
                 return False, f"Failed to generate {content_type}", {}
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return False, f"Error: {str(e)}", {}
     
     # Keep the old method for backwards compatibility
@@ -715,7 +794,17 @@ class StudyManager:
         
         row = cursor.fetchone()
         if not row:
-            return None
+            # Fallback: try to get any explanation for this sentence
+            cursor.execute("""
+                SELECT id, sentence, explanation, explanation_language, focus_area,
+                       grammar_notes, user_notes, created_at, last_updated, source
+                FROM sentence_explanations
+                WHERE imported_content_id = ?
+                LIMIT 1
+            """, (imported_content_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
         
         return {
             'id': row[0],
@@ -797,11 +886,17 @@ class StudyManager:
         try:
             for focus_area in focus_areas:
                 # Get the prompt for this focus area
-                prompt_template = self.get_sentence_prompt(focus_area)
+                prompt_template = self._get_effective_prompt('sentence', focus_area)
                 prompt = prompt_template.format(sentence=sentence, language=target_lang, study_language=self.study_language)
                 
                 # Generate
+                start_time = time.time()
                 explanation = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+                duration = time.time() - start_time
+                
+                desc = f"Sentence focus: {focus_area} for \"{sentence[:20]}...\""
+                self._log_debug('sentence_explanation', prompt, explanation or "EMPTY", duration, description=desc)
+                
                 if explanation:
                     # Parse suggestions
                     clean_explanation, suggestions = self._parse_ai_response(explanation)
@@ -838,23 +933,6 @@ class StudyManager:
             return False, f"Error: {str(e)}", {}
     
     # ========== GRAMMAR FOLLOW-UPS ==========
-    
-    def ask_grammar_followup(self, sentence_explanation_id: int, question: str) -> Tuple[bool, str]:
-        # ... (This method uses context so parsing might be weird/unnecessary for suggestions, keeping 2 return vals to avoid breaking too much, 
-        # but helper logic needs consistency? No, calling logic is manual. Worker loop doesn't call this.)
-        # Wait, the worker loop handles generation content. Follow-ups are synchronous/on-demand in GUI (lines 740).
-        # So I don't need to change this one.
-        
-        """
-        Ask a follow-up question about a sentence explanation with full context.
-        ...
-        """
-        # (Content omitted to save space, keeping original logic for this method)
-        return super().ask_grammar_followup(sentence_explanation_id, question) if hasattr(super(), 'ask_grammar_followup') else self._fallback_followup(sentence_explanation_id, question)
-
-    # Re-implementing ask_grammar_followup properly since I can't use super() on self without inheritance context shown here.
-    # Actually, I should just NOT replace it if I'm not changing it.
-    # The tool replaces a range. I spanned over it. I will paste the original `ask_grammar_followup` back in.
     
     def ask_grammar_followup(self, sentence_explanation_id: int, question: str) -> Tuple[bool, str]:
         """
@@ -910,7 +988,13 @@ New question from student: {question}
 Please provide a clear, helpful answer in {target_lang}. Reference the original sentence and previous discussion when relevant. Be specific and provide examples when helpful."""
         
         try:
+            start_time = time.time()
             answer = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            duration = time.time() - start_time
+            
+            desc = f"Follow-up: {question[:30]}..."
+            self._log_debug('grammar_followup', prompt, answer or "EMPTY", duration, description=desc)
+            
             if answer:
                 # Store the follow-up
                 self.db.add_grammar_followup(
@@ -966,7 +1050,13 @@ Any important exceptions or nuances.
 """
         
         try:
+            start_time = time.time()
             content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            duration = time.time() - start_time
+            
+            desc = f"Grammar: {topic}"
+            self._log_debug('grammar_explanation', prompt, content or "EMPTY", duration, description=desc)
+            
             if content:
                 clean_content, suggestions = self._parse_ai_response(content)
                 return True, clean_content, suggestions
@@ -1057,12 +1147,10 @@ Any important exceptions or nuances.
             
             # 2. Add definition if provided
             if definition:
-                self.db.add_word_definition(
+                self.add_word_definition(
                     imported_content_id=content_id,
-                    word=word,
                     definition=definition,
-                    definition_language=self.native_language,
-                    source='user'
+                    definition_language=self.native_language
                 )
                 
             return True, "Word added successfully"
@@ -1142,7 +1230,7 @@ Any important exceptions or nuances.
         if not self.ollama_client or not self.ollama_client.is_available():
             return False, "Ollama is not available", {}
             
-        prompt_template = WRITING_PROMPTS['generate_topic']['template']
+        prompt_template = self._get_effective_prompt('writing', 'generate_topic')
         prompt = prompt_template.format(
             study_language=self.study_language,
             native_language=self.native_language
@@ -1161,7 +1249,7 @@ Any important exceptions or nuances.
         if not self.ollama_client or not self.ollama_client.is_available():
             return False, "Ollama is not available", {}
             
-        prompt_template = WRITING_PROMPTS['grade']['template']
+        prompt_template = self._get_effective_prompt('writing', 'grade')
         prompt = prompt_template.format(
             study_language=self.study_language,
             topic=topic,
@@ -1169,23 +1257,29 @@ Any important exceptions or nuances.
             native_language=self.native_language
         )
         
+        start_time = time.time()
         try:
             content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            duration = time.time() - start_time
+            desc = f"Grading writing: {topic}"
+            self._log_debug('grade_writing', prompt, content or "EMPTY", duration, description=desc)
+            
             if content:
                 clean_content, suggestions = self._parse_ai_response(content)
                 
                 # Save to history
-                # We'll extract a "grade" from the clean_content if possible, 
-                # or just use a placeholder for now.
-                # A simple way to get grade is to look for "Overall Grade:"
                 grade_match = re.search(r'Overall Grade:\s*(.*?)(?:\n|$)', clean_content, re.IGNORECASE)
                 grade = grade_match.group(1).strip() if grade_match else "N/A"
                 
-                self.db.add_writing_session(topic, user_writing, clean_content, grade, self.study_language)
+                self.db.add_writing_session(
+                    topic, user_writing, clean_content, grade, 
+                    self.study_language, analysis=json.dumps(suggestions)
+                )
                 
                 return True, clean_content, suggestions
             return False, "Failed to grade writing", {}
         except Exception as e:
+            self._log_debug('grade_writing', prompt, "ERROR", time.time() - start_time, error=str(e))
             import traceback
             traceback.print_exc()
             return False, f"Error: {e}", {}
@@ -1209,17 +1303,7 @@ Any important exceptions or nuances.
         return self.db.get_chat_messages(session_id)
 
     def send_chat_message(self, session_id: int, user_message: str, current_history: List[Dict]) -> Tuple[bool, Dict, Dict]:
-        """
-        Send a message to the AI and process the response.
-        
-        Args:
-            session_id: The active session
-            user_message: The user's input
-            current_history: Recent messages (for context window)
-            
-        Returns:
-            Tuple(success, result_dict, suggestions_dict)
-        """
+        """Send a message to the AI and process the response."""
         if not self.ollama_client or not self.ollama_client.is_available():
             return False, {"error": "Ollama is not available"}, {}
 
@@ -1227,14 +1311,10 @@ Any important exceptions or nuances.
         self.db.add_chat_message(session_id, 'user', user_message)
         
         # 2. Build Prompt
-        # Get context (last 10 messages)
-        # Note: In a real app we'd construct a proper conversation history for the LLM API
-        # but for now we'll append to the system prompt
-        
         session = next((s for s in self.get_chat_sessions() if s['id'] == session_id), None)
         topic = session['cur_topic'] if session else "General Conversation"
         
-        prompt_template = CHAT_PROMPTS['system_roleplay']['template']
+        prompt_template = self._get_effective_prompt('chat', 'system_roleplay')
         system_prompt = prompt_template.format(
             persona="Language Tutor",
             study_language=self.study_language,
@@ -1250,21 +1330,31 @@ Any important exceptions or nuances.
         full_prompt += f"User: {user_message}\nAssistant:"
         
         # 3. Generate Request
+        start_time = time.time()
         try:
             content = self.ollama_client.generate_response(full_prompt, timeout=self.request_timeout)
+            duration = time.time() - start_time
+            desc = f"Chat message: {user_message[:30]}..."
+            self._log_debug('chat_message', full_prompt, content or "EMPTY", duration, description=desc)
+            
             if content:
                 # 4. Parse Response (XML)
                 parsed_data, suggestions = self._parse_chat_response(content)
                 
                 # 5. Save Assistant Message
-                # We save the 'reply' as content, and the full JSON as analysis
                 import json
-                analysis_json = json.dumps(parsed_data)
+                
+                # Merge suggestions into analysis dict for storage
+                analysis_data = parsed_data.copy()
+                analysis_data['suggestions'] = suggestions
+                
+                analysis_json = json.dumps(analysis_data)
                 self.db.add_chat_message(session_id, 'assistant', parsed_data['reply'], analysis_json)
                 
                 return True, parsed_data, suggestions
             return False, {"error": "Failed to generate response"}, {}
         except Exception as e:
+            self._log_debug('chat_message', full_prompt, "ERROR", time.time() - start_time, error=str(e))
             import traceback
             traceback.print_exc()
             return False, {"error": f"Error: {e}"}, {}
@@ -1294,11 +1384,13 @@ Any important exceptions or nuances.
         }
         
         # Re-use existing suggestion parser on the specific sections
-        _, vocab_suggs = self._parse_ai_response(vocab_section)
-        parsed_suggestions['flashcards'].extend(vocab_suggs['flashcards'])
+        if vocab_section:
+             _, vocab_suggs = self._parse_ai_response(vocab_section)
+             parsed_suggestions['flashcards'].extend(vocab_suggs['flashcards'])
         
-        _, gram_suggs = self._parse_ai_response(grammar_section)
-        parsed_suggestions['grammar'].extend(gram_suggs['grammar'])
+        if grammar_section:
+             _, gram_suggs = self._parse_ai_response(grammar_section)
+             parsed_suggestions['grammar'].extend(gram_suggs['grammar'])
         
         return {
             'reply': reply,

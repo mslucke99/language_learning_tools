@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from flashcard import Flashcard
+from .flashcard import Flashcard
 
 def get_due_flashcards(flashcards: list[Flashcard]) -> list[Flashcard]:
     """Filter flashcards that are due for review."""
