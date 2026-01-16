@@ -1,0 +1,43 @@
+# Android App Port Strategy: The "Companion" Model
+
+## Concept
+Instead of a full replacement, the Android app acts as a **Review & Capture Companion**. The PC remains the "Power Station" for AI generation and heavy processing.
+
+## Architecture: Offline-First with Sync
+1.  **PC (The Power Station)**: Runs Ollama, generates content, manages complex logic.
+2.  **Android (The Companion)**: Downloads the latest data for offline study. Uploads new captures (words/notes) to be processed later.
+
+## Detailed Roadmap
+
+### Phase 1: The "Reader" (Review Only)
+**Goal**: Allow the user to study what they have already created.
+-   **Features**:
+    -   Flashcard Review (Anki-style SRS).
+    -   Read-only view of "Sentence Explanations" and "Essay Feedback".
+    -   View Chat History logs.
+-   **Tech**:
+    -   Simple API to "Pull" the latest database (or JSON export) from PC.
+    -   Local SQLite on Android to store this cached data.
+
+### Phase 2: The "Capturer" (Input)
+**Goal**: Allow the user to collect material while on the go.
+-   **Features**:
+    -   **"Share to App"**: Highlight text in Android browser -> Share -> Save to Queue.
+    -   **Quick Notes**: specific tab for jotting down grammar questions or vocab.
+    -   **Edit**: Fix typos in explanations or add personal notes to existing items.
+-   **Sync**:
+    -   Push these "Pending Items" to the PC.
+    -   PC processes them (e.g., auto-generates definitions) when it comes online.
+
+### Phase 3: The "Syncer" (Two-way)
+**Goal**: Seamless state management.
+-   **Features**:
+    -   Sync flashcard reviews (so you don't review the same card twice).
+    -   Conflict resolution (if you edited a note on both devices).
+
+## Feasibility Assessment
+-   **Viability**: **Extremely High**. This avoids running heavy AI on the phone.
+-   **Data Structure**: Your SQLite database is portable. You could literally copy `flashcards.db` to the phone for a crude "sync" initially.
+-   **Effort**:
+    -   **Phase 1**: 3-4 Weeks (Building the UI for reviewing existing, complex data structures).
+    -   **Phase 2**: 2-3 Weeks (Android Intent filtering for "Share" menu).
