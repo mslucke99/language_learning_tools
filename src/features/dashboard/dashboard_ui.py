@@ -263,18 +263,15 @@ class DashboardApp:
             from src.services.conflict_dialog import ConflictResolverDialog
             
             resolver = lambda data: ConflictResolverDialog(self.root, data).show()
-            merger = SyncMerger(self.db.db_path, temp_path, resolver)
+            merger = SyncMerger(self.db.db_path, temp_path)
+            merger.on_conflict = resolver
             
             stats = merger.perform_merge()
             
             # 3. Reload
-            self.db.close() # Close current connection
-            # The DB instance might need a 'reopen' or similar if it caches connection
-            # FlashcardDatabase usually creates a new connection each time or keeps one.
-            # Let's assume re-initializing or just closing is enough if the app fetches a new one.
-            # In our case, we might need to notify other frames.
+            self.reload_db()
             
-            # Refresh current view if it's the home dashboard or flashcard list
+            # Refresh current view
             self.show_home() 
 
             # Cleanup
@@ -286,10 +283,29 @@ class DashboardApp:
                 f"Sync successful!\nAdded: {stats['added']}\nUpdated: {stats['updated']}\nConflicts: {stats['conflicts_resolved']}")
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             messagebox.showerror("Sync Error", str(e))
         finally:
             self.sync_btn.config(state="normal")
             self.root.config(cursor="")
+
+    def reload_db(self):
+        """Re-initialize database connection and update dependent managers."""
+        if hasattr(self, 'db'):
+            try:
+                self.db.close()
+            except:
+                pass
+        
+        from src.core.database import FlashcardDatabase
+        self.db = FlashcardDatabase() # Uses default flashcards.db
+        
+        # Update dependencies
+        self.study_manager.db = self.db
+        self.io_manager.db = self.db
+        
+        print("[DB] Database connection re-initialized after sync.")
 
 class HomeDashboard(ttk.Frame):
     def __init__(self, parent, controller):

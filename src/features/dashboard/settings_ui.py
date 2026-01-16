@@ -306,13 +306,18 @@ class SettingsUI(ttk.Frame):
         try:
             from src.services.sync_merger import SyncMerger
             from src.services.conflict_dialog import ConflictResolverDialog
-            from src.core.database import db # Singleton access
             
             # Setup Merger
             resolver_dialog_provider = lambda conflict_data: ConflictResolverDialog(self.winfo_toplevel(), conflict_data).show()
-            merger = SyncMerger(db.db_path, temp_path, resolver_dialog_provider)
+            merger = SyncMerger(self.study_manager.db.db_path, temp_path)
+            merger.on_conflict = resolver_dialog_provider
             
             stats = merger.perform_merge()
+            
+            # 3. Reload and Cleanup
+            merger.close()
+            if hasattr(self.controller, 'reload_db'):
+                self.controller.reload_db()
             
             # Cleanup temp
             import os

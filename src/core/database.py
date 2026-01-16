@@ -6,6 +6,7 @@ from typing import Optional, List, Dict
 
 class FlashcardDatabase:
     def __init__(self, db_name="flashcards.db"):
+        self.db_path = db_name
         # check_same_thread=False allows the connection to be used across Flask request threads
         # This is safe for this application since we're not doing concurrent writes
         # isolation_level=None sets autocommit mode for immediate visibility across threads
@@ -331,7 +332,7 @@ class FlashcardDatabase:
         sync_hardening_tables = [
             "decks", "flashcards", "imported_content", "writing_sessions", 
             "chat_sessions", "word_definitions", "sentence_explanations", 
-            "grammar_book_entries", "collections"
+            "grammar_book_entries", "collections", "chat_messages"
         ]
         
         for table in sync_hardening_tables:

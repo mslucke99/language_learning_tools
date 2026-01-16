@@ -46,6 +46,7 @@ const List<String> syncableTables = [
   'chat_sessions',
   'grammar_book_entries',
   'collections',
+  'chat_messages',
 ];
 
 /// Sync Merger - handles row-by-row comparison between databases

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:uuid/uuid.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -206,6 +207,21 @@ class DatabaseHelper {
         deleted_at TEXT
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        analysis TEXT,
+        created_at TEXT NOT NULL,
+        uuid TEXT UNIQUE,
+        last_modified TEXT,
+        deleted_at TEXT,
+        FOREIGN KEY (session_id) REFERENCES chat_sessions (id) ON DELETE CASCADE
+      )
+    ''');
   }
 
   // Reload DB connection (useful after overwriting the file)
@@ -232,5 +248,50 @@ class DatabaseHelper {
       print("Error counting flashcards: $e");
       return -1;
     }
+  }
+
+  // ===== CRUD UTILITIES =====
+
+  Future<int> insertItem(String table, Map<String, dynamic> data) async {
+    final db = await database;
+    final Map<String, dynamic> mutableData = Map.from(data);
+
+    // Add sync metadata
+    mutableData['uuid'] ??= const Uuid().v4();
+    mutableData['last_modified'] = DateTime.now().toIso8601String();
+    mutableData['created_at'] ??= DateTime.now().toIso8601String();
+
+    return await db.insert(table, mutableData);
+  }
+
+  Future<int> updateItem(
+    String table,
+    int id,
+    Map<String, dynamic> data,
+  ) async {
+    final db = await database;
+    final Map<String, dynamic> mutableData = Map.from(data);
+
+    // Update sync metadata
+    mutableData['last_modified'] = DateTime.now().toIso8601String();
+
+    return await db.update(
+      table,
+      mutableData,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> softDelete(String table, int id) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+
+    return await db.update(
+      table,
+      {'deleted_at': now, 'last_modified': now},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 }

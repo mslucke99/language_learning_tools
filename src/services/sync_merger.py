@@ -32,11 +32,16 @@ class ConflictInfo:
 SYNCABLE_TABLES = [
     "decks", "flashcards", "imported_content", "word_definitions",
     "sentence_explanations", "writing_sessions", "chat_sessions",
-    "grammar_book_entries", "collections"
+    "grammar_book_entries", "collections", "chat_messages"
 ]
 
 class SyncMerger:
     def __init__(self, local_db_path: str, remote_db_path: str, last_sync_time: Optional[str] = None):
+        print(f"[SyncMerger] __init__ called with:")
+        print(f"  local_db_path: {local_db_path!r} (type: {type(local_db_path)})")
+        print(f"  remote_db_path: {remote_db_path!r} (type: {type(remote_db_path)})")
+        print(f"  last_sync_time: {last_sync_time!r} (type: {type(last_sync_time)})")
+        
         self.local_conn = sqlite3.connect(local_db_path)
         self.local_conn.row_factory = sqlite3.Row
         self.remote_conn = sqlite3.connect(remote_db_path)
@@ -76,7 +81,13 @@ class SyncMerger:
         """Check if a row was modified after last sync."""
         if not last_modified:
             return False
-        return last_modified > self.last_sync_time
+        try:
+            return last_modified > self.last_sync_time
+        except TypeError as e:
+            print(f"[SyncMerger] TypeError in _is_modified_since_sync: {e}")
+            print(f"[SyncMerger] last_modified: {last_modified} (type: {type(last_modified)})")
+            print(f"[SyncMerger] self.last_sync_time: {self.last_sync_time} (type: {type(self.last_sync_time)})")
+            raise e
     
     def _resolve_srs_conflict(self, local: Dict, remote: Dict) -> Dict:
         """Special handling for flashcard SRS data: most progress wins."""
