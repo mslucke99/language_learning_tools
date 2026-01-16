@@ -42,10 +42,12 @@ dependencies:
   sqflite: ^2.3.0
   path: ^1.8.3
 
-  # Google Drive Sync
-  google_sign_in: ^6.1.5
-  googleapis: ^11.0.0
-  extension_google_sign_in_as_googleapis_auth: ^2.0.11
+  # Dropbox Sync
+  url_launcher: ^6.1.11
+  flutter_secure_storage: ^9.0.0
+  http: ^1.1.0
+  app_links: ^6.3.2
+  crypto: ^3.0.3 # For PKCE challenge generation
 
   # Utilities
   path_provider: ^2.1.1

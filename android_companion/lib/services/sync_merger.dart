@@ -258,11 +258,25 @@ class SyncMerger {
     ]);
   }
 
+  Future<bool> _tableExists(Database db, String table) async {
+    final results = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+      [table],
+    );
+    return results.isNotEmpty;
+  }
+
   Future<Map<String, (int, int, int)>> mergeAll() async {
     final results = <String, (int, int, int)>{};
     for (final table in syncableTables) {
       try {
-        results[table] = await mergeTable(table);
+        if (await _tableExists(localDb, table) &&
+            await _tableExists(remoteDb, table)) {
+          results[table] = await mergeTable(table);
+        } else {
+          print('Skipping $table: not found in both local and remote');
+          results[table] = (0, 0, 0);
+        }
       } catch (e) {
         print('Error merging $table: $e');
         results[table] = (0, 0, 0);

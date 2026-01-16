@@ -22,9 +22,10 @@ from src.features.writing_lab.ui.writing_lab import WritingLabFrame
 
 from src.features.chat.ui.chat_dashboard import ChatDashboardFrame
 from src.features.chat.ui.active_chat import ActiveChatFrame
-from src.features.dashboard.settings_ui import SettingsFrame
+from src.features.dashboard.settings_ui import SettingsUI as SettingsFrame
 from src.features.dashboard.task_queue_ui import TaskQueueDialog
 from src.features.dashboard.dev_console_ui import DevConsoleDialog
+from src.services.dropbox_sync import dropbox_manager
 
 class DashboardApp:
     def __init__(self, root):
@@ -198,6 +199,9 @@ class DashboardApp:
 
         self.dev_btn = ttk.Button(self.status_bar, text="🚀 Dev", command=self.show_dev_console, width=8)
         self.dev_btn.pack(side="right", padx=5)
+
+        self.sync_btn = ttk.Button(self.status_bar, text="🔄 Sync", command=self.perform_global_sync, width=8)
+        self.sync_btn.pack(side="right", padx=5)
         
     def _update_status_bar(self):
         # Update Ollama Status
@@ -224,6 +228,68 @@ class DashboardApp:
 
     def show_dev_console(self):
         DevConsoleDialog(self.root, self.study_manager)
+
+    def perform_global_sync(self):
+        """Perform a full cloud sync (download + merge) from the status bar."""
+        if not dropbox_manager.is_authenticated():
+            messagebox.showwarning("Sync", "Dropbox not connected. Please go to Settings > Cloud Sync.")
+            return
+
+        # Disable button during sync
+        self.sync_btn.config(state="disabled")
+        self.root.config(cursor="wait")
+        self.root.update()
+
+        try:
+            # 1. Download
+            success, temp_path, message = dropbox_manager.download_db_to_temp()
+            if not success:
+                if "No backup found" in message:
+                    # Offer to initialize
+                    confirm = messagebox.askyesno("First-Time Sync", 
+                        "No cloud backup found on Dropbox.\n\nWould you like to upload your local data as the initial cloud copy?")
+                    if confirm:
+                        success_up, msg_up = dropbox_manager.upload_db()
+                        if success_up:
+                            messagebox.showinfo("Sync Initialized", "Initial upload complete! You can now sync from other devices.")
+                        else:
+                            messagebox.showerror("Upload Failed", msg_up)
+                else:
+                    messagebox.showerror("Sync Failed", message)
+                return
+
+            # 2. Merge
+            from src.services.sync_merger import SyncMerger
+            from src.services.conflict_dialog import ConflictResolverDialog
+            
+            resolver = lambda data: ConflictResolverDialog(self.root, data).show()
+            merger = SyncMerger(self.db.db_path, temp_path, resolver)
+            
+            stats = merger.perform_merge()
+            
+            # 3. Reload
+            self.db.close() # Close current connection
+            # The DB instance might need a 'reopen' or similar if it caches connection
+            # FlashcardDatabase usually creates a new connection each time or keeps one.
+            # Let's assume re-initializing or just closing is enough if the app fetches a new one.
+            # In our case, we might need to notify other frames.
+            
+            # Refresh current view if it's the home dashboard or flashcard list
+            self.show_home() 
+
+            # Cleanup
+            import os
+            try: os.remove(temp_path)
+            except: pass
+
+            messagebox.showinfo("Sync Complete", 
+                f"Sync successful!\nAdded: {stats['added']}\nUpdated: {stats['updated']}\nConflicts: {stats['conflicts_resolved']}")
+            
+        except Exception as e:
+            messagebox.showerror("Sync Error", str(e))
+        finally:
+            self.sync_btn.config(state="normal")
+            self.root.config(cursor="")
 
 class HomeDashboard(ttk.Frame):
     def __init__(self, parent, controller):

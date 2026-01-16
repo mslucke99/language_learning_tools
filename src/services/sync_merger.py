@@ -119,6 +119,7 @@ class SyncMerger:
         added = 0
         updated = 0
         conflicts = 0
+        soft_deleted = 0
         
         local_cursor = self.local_conn.cursor()
         
@@ -202,9 +203,10 @@ class SyncMerger:
                 else:
                     # Safe to delete locally
                     self._soft_delete_row(local_cursor, table, uuid)
+                    soft_deleted += 1
         
         self.local_conn.commit()
-        return added, updated, conflicts
+        return added, updated, conflicts, soft_deleted
     
     def _insert_row(self, cursor, table: str, row: Dict):
         """Insert a new row."""
@@ -226,7 +228,7 @@ class SyncMerger:
         now = datetime.now().isoformat()
         cursor.execute(f"UPDATE {table} SET deleted_at = ? WHERE uuid = ?", (now, uuid))
     
-    def merge_all(self) -> Dict[str, Tuple[int, int, int]]:
+    def merge_all(self) -> Dict[str, Tuple[int, int, int, int]]:
         """Merge all syncable tables. Returns stats per table."""
         results = {}
         for table in SYNCABLE_TABLES:
@@ -234,5 +236,18 @@ class SyncMerger:
                 results[table] = self.merge_table(table)
             except Exception as e:
                 print(f"Error merging {table}: {e}")
-                results[table] = (0, 0, 0)
+                results[table] = (0, 0, 0, 0)
         return results
+
+    def perform_merge(self) -> Dict[str, int]:
+        """Convenience method to merge all and aggregate stats."""
+        all_results = self.merge_all()
+        aggregated = {"added": 0, "updated": 0, "conflicts_resolved": 0, "soft_deleted": 0}
+        
+        for added, updated, conflicts, soft_deleted in all_results.values():
+            aggregated["added"] += added
+            aggregated["updated"] += updated
+            aggregated["conflicts_resolved"] += conflicts
+            aggregated["soft_deleted"] += soft_deleted
+            
+        return aggregated

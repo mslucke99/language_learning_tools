@@ -105,6 +105,8 @@ class StudyManager:
         return self.get_custom_prompt(category, prompt_id, template_type)
 
     # ===== QUEUE MANAGEMENT =====
+
+    def queue_generation_task(self, task_type: str, item_id: int, **kwargs) -> str:
         """
         Queue a generation task.
         

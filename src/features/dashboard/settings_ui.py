@@ -1,47 +1,57 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox
+import threading
+
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.ui_utils import setup_standard_header
 from src.features.dashboard.prompt_editor_ui import PromptEditorDialog
 from src.core.localization import tr, set_locale
-from src.services.cloud_sync import CloudSyncManager, CONFIG_DIR
-import os
 
-class SettingsFrame(ttk.Frame):
-    def __init__(self, parent, controller, study_manager: StudyManager):
+# Config dir is now handled largely by the manager but kept for display if needed
+from src.services.dropbox_sync import dropbox_manager, CONFIG_DIR
+
+class SettingsUI(ttk.Frame):
+    def __init__(self, parent, controller, study_manager):
         super().__init__(parent)
         self.controller = controller
         self.study_manager = study_manager
         
+        # Check Ollama
         self.ollama_available = study_manager.ollama_client is not None and study_manager.ollama_client.is_available()
         self.available_models = []
         
-        # Initialize CloudSyncManager
-        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'flashcards.db')
-        self.cloud_sync = CloudSyncManager(db_path)
+        # Initialize Dropbox Sync
+        self.dropbox_sync = dropbox_manager
         
+        # Variables
+        self.study_lang_var = tk.StringVar()
+        self.native_lang_var = tk.StringVar()
+        self.model_var = tk.StringVar()
+        self.timeout_var = tk.IntVar()
+        self.preload_var = tk.BooleanVar()
+        self.sync_status_var = tk.StringVar(value="Not connected")
+        
+        if self.dropbox_sync.is_authenticated():
+            self.sync_status_var.set("Connected to Dropbox ✅")
+            
         self.setup_ui()
         self.load_settings()
-        
+
     def setup_ui(self):
-        setup_standard_header(self, tr("header_settings", "⚙️ Application Settings"), back_cmd=self.go_back)
-        
-        # Main Notebook
+        # Create Notebook for tabs
         self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=20, pady=(10, 0))
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # --- TAB 1: GENERAL (Languages) ---
+        # --- TAB 1: GENERAL ---
         gen_tab = ttk.Frame(self.notebook, padding="20")
-        self.notebook.add(gen_tab, text=tr("tab_general", "General"))
+        self.notebook.add(gen_tab, text=tr("tab_general", "⚙️ General"))
         
-        ttk.Label(gen_tab, text=tr("lbl_language_config", "Language Configuration"), font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 20))
-        
+        # Use a grid for alignment
         lang_grid = ttk.Frame(gen_tab)
         lang_grid.pack(fill="x")
-        
+
         # Study Language (Target)
         ttk.Label(lang_grid, text=tr("lbl_study_lang", "Study Language (target):")).grid(row=0, column=0, sticky="w", pady=10)
-        self.study_lang_var = tk.StringVar()
         self.study_lang_combo = ttk.Combobox(lang_grid, textvariable=self.study_lang_var, 
                                             values=["Spanish", "French", "German", "Japanese", "Korean", "Mandarin", "Italian", "Portuguese", "Russian", "Arabic", "Biblical Greek"],
                                             width=32, state="readonly")
@@ -49,7 +59,6 @@ class SettingsFrame(ttk.Frame):
         
         # Native Language (for definitions)
         ttk.Label(lang_grid, text=tr("lbl_native_lang", "Native Language (ui/def):")).grid(row=1, column=0, sticky="w", pady=10)
-        self.native_lang_var = tk.StringVar()
         ttk.Entry(lang_grid, textvariable=self.native_lang_var, width=35).grid(row=1, column=1, sticky="w", padx=15)
         
         # UI Language (Test)
@@ -76,7 +85,6 @@ class SettingsFrame(ttk.Frame):
         ai_grid.pack(fill="x")
         
         ttk.Label(ai_grid, text="Default Model:").grid(row=0, column=0, sticky="w", pady=10)
-        self.model_var = tk.StringVar()
         self.model_combo = ttk.Combobox(ai_grid, textvariable=self.model_var, state="readonly", width=32)
         self.model_combo.grid(row=0, column=1, sticky="w", padx=15)
         
@@ -88,10 +96,8 @@ class SettingsFrame(ttk.Frame):
                  self.model_combo['values'] = ["Error fetching models"]
         
         ttk.Label(ai_grid, text="Request Timeout (sec):").grid(row=1, column=0, sticky="w", pady=10)
-        self.timeout_var = tk.IntVar(value=30)
         ttk.Spinbox(ai_grid, from_=5, to=300, increment=5, textvariable=self.timeout_var, width=10).grid(row=1, column=1, sticky="w", padx=15)
         
-        self.preload_var = tk.BooleanVar()
         ttk.Checkbutton(ai_tab, text="Pre-load model on application startup", variable=self.preload_var).pack(anchor="w", pady=15)
         
         # --- TAB 3: PROMPTS (Tuning) ---
@@ -111,14 +117,14 @@ class SettingsFrame(ttk.Frame):
         
         # --- TAB 4: CLOUD SYNC ---
         sync_tab = ttk.Frame(self.notebook, padding="20")
-        self.notebook.add(sync_tab, text="☁️ Cloud Sync")
+        self.notebook.add(sync_tab, text="☁️ Cloud Sync (Dropbox)")
         
-        ttk.Label(sync_tab, text="Google Drive Sync", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
-        ttk.Label(sync_tab, text="Sync your data with Google Drive for use across devices.", 
+        ttk.Label(sync_tab, text="Dropbox Sync", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(sync_tab, text="Sync your data via your private App Folder.", 
                   wraplength=500, justify="left").pack(anchor="w", pady=(0, 15))
         
         # Status indicator
-        self.sync_status_var = tk.StringVar(value="Not connected")
+        # self.sync_status_var = tk.StringVar(value="Not connected") # Moved to __init__
         status_frame = ttk.Frame(sync_tab)
         status_frame.pack(fill="x", pady=(0, 15))
         ttk.Label(status_frame, text="Status:").pack(side="left")
@@ -127,12 +133,10 @@ class SettingsFrame(ttk.Frame):
         # Connect button
         connect_frame = ttk.Frame(sync_tab)
         connect_frame.pack(fill="x", pady=5)
-        ttk.Button(connect_frame, text="🔗 Connect Google Account", 
-                   command=self._connect_google).pack(side="left")
-        ttk.Button(connect_frame, text="Disconnect", 
-                   command=self._disconnect_google).pack(side="left", padx=5)
-        ttk.Button(connect_frame, text="🔑 Manage Credentials", 
-                   command=self._open_credentials_manager).pack(side="left", padx=5)
+        ttk.Button(connect_frame, text="🔗 Connect Dropbox", 
+                   command=self._open_dropbox_auth).pack(side="left")
+        ttk.Button(connect_frame, text="Unlink", 
+                   command=self._disconnect_dropbox).pack(side="left", padx=10)
         
         # Sync actions
         ttk.Separator(sync_tab, orient="horizontal").pack(fill="x", pady=20)
@@ -146,10 +150,27 @@ class SettingsFrame(ttk.Frame):
         ttk.Button(action_frame, text="⬇️ Restore from Cloud", 
                    command=self._restore_from_cloud, width=20).pack(side="left", padx=5)
         
-        ttk.Label(sync_tab, text="⚠️ Backup will overwrite the cloud copy. Restore will overwrite your local data.", 
+        ttk.Label(sync_tab, text="⚠️ Backup will overwrite the cloud copy. Restore will merge changes.", 
                   font=("Arial", 9, "italic"), foreground="#CC5500", wraplength=500).pack(anchor="w", pady=15)
         
-        ttk.Label(sync_tab, text=f"Credentials folder: {CONFIG_DIR}", 
+        # --- Safety & Checkpoints ---
+        ttk.Separator(sync_tab, orient="horizontal").pack(fill="x", pady=20)
+        ttk.Label(sync_tab, text="Safety & Checkpoints", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(sync_tab, text="Create a snapshot of your data before performing a manual sync to ensure you can revert if needed.", 
+                  font=("Arial", 9), foreground="gray", wraplength=500).pack(anchor="w", pady=(0, 10))
+        
+        checkpoint_frame = ttk.Frame(sync_tab)
+        checkpoint_frame.pack(fill="x", pady=5)
+        
+        ttk.Button(checkpoint_frame, text="💾 Local Checkpoint", 
+                   command=lambda: self._create_checkpoint(cloud=False), width=20).pack(side="left", padx=5)
+        ttk.Button(checkpoint_frame, text="☁️ Cloud Checkpoint", 
+                   command=lambda: self._create_checkpoint(cloud=True), width=20).pack(side="left", padx=5)
+        
+        ttk.Button(sync_tab, text="📂 Open Backup Folder", 
+                   command=self._open_backup_folder, width=20).pack(anchor="w", padx=5, pady=10)
+
+        ttk.Label(sync_tab, text=f"Config: {CONFIG_DIR}", 
                   font=("Arial", 8), foreground="gray").pack(anchor="w", pady=(20, 0))
         
         # --- FOOTER: SAVE BUTTON ---
@@ -205,73 +226,136 @@ class SettingsFrame(ttk.Frame):
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save settings: {e}")
     
-    # --- Cloud Sync Methods ---
-    def _open_credentials_manager(self):
-        from src.features.cloud_sync.credentials_dialog import CredentialsManagerDialog
+    # --- Cloud Sync Methods (Dropbox) ---
+    def _open_dropbox_auth(self):
+        from src.features.cloud_sync.dropbox_dialog import DropboxAuthDialog
         
-        def on_update():
-            # Refresh connection status if needed
-            if self.cloud_sync.is_authenticated():
-                self.sync_status_var.set("Connected ✅")
-            else:
-                self.sync_status_var.set("Not connected")
+        def on_success():
+            self.sync_status_var.set("Connected to Dropbox ✅")
+            messagebox.showinfo("Success", "Dropbox connected successfully!")
 
-        CredentialsManagerDialog(self.winfo_toplevel(), self.cloud_sync, on_update)
+        DropboxAuthDialog(self.winfo_toplevel(), self.dropbox_sync, on_success)
 
-    def _connect_google(self):
-        if not self.cloud_sync.is_available():
-            messagebox.showerror("Error", "Google API libraries not installed.\nRun: pip install -r requirements.txt")
-            return
-        
-        if not self.cloud_sync.has_credentials_file():
-            res = messagebox.askyesno("Missing Credentials", 
-                "No credentials.json found.\nWould you like to open the Credentials Manager to import it?")
-            if res:
-                self._open_credentials_manager()
-            return
-        
-        success, message = self.cloud_sync.authenticate()
-        if success:
-            self.sync_status_var.set("Connected ✅")
-            messagebox.showinfo("Success", message)
-        else:
-            self.sync_status_var.set("Connection failed ❌")
-            messagebox.showerror("Error", message)
-    
-    def _disconnect_google(self):
-        self.cloud_sync.disconnect()
+    def _disconnect_dropbox(self):
+        self.dropbox_sync.disconnect()
         self.sync_status_var.set("Not connected")
-        messagebox.showinfo("Disconnected", "Google account disconnected.")
+        messagebox.showinfo("Disconnected", "Dropbox account disconnected.")
     
     def _backup_to_cloud(self):
-        if not self.cloud_sync.is_authenticated():
-            messagebox.showwarning("Not Connected", "Please connect your Google account first.")
+        if not self.dropbox_sync.is_authenticated():
+            messagebox.showwarning("Not Connected", "Please connect your Dropbox account first.")
             return
         
         confirm = messagebox.askyesno("Confirm Backup", 
-            "This will REPLACE your cloud backup with local data.\n\nProceed?")
+            "This will OVERWRITE your cloud backup '/Apps/LanguageLearningSuite/flashcards.db' with local data.\n\nProceed?")
         if not confirm:
             return
         
-        success, message = self.cloud_sync.backup_to_cloud()
+        # UI Feedback
+        self.config(cursor="wait") 
+        self.update()
+
+        def status_callback(msg):
+             print(f"[Sync] {msg}") # Just log for now
+
+        success, message = self.dropbox_sync.upload_db(status_callback)
+        
+        self.config(cursor="")
+        
         if success:
             messagebox.showinfo("Backup Complete", message)
         else:
             messagebox.showerror("Backup Failed", message)
     
     def _restore_from_cloud(self):
-        if not self.cloud_sync.is_authenticated():
-            messagebox.showwarning("Not Connected", "Please connect your Google account first.")
+        if not self.dropbox_sync.is_authenticated():
+            messagebox.showwarning("Not Connected", "Please connect your Dropbox account first.")
             return
         
         confirm = messagebox.askyesno("Confirm Restore", 
-            "This will REPLACE your local data with the cloud backup.\n\n" +
-            "A backup of your current local data will be saved as flashcards.db.backup.\n\nProceed?")
+            "This will download 'flashcards.db' from Dropbox and MERGE it with your local data.\n\nProceed?")
         if not confirm:
             return
+
+        # Use the CloudSyncManager wrapper mostly for the merge logic?
+        # Actually we need to call dropbox_sync to get the temp file, then call SyncMerger manually
+        # OR we can update CloudSyncManager to use Dropbox.
+        # Ideally, lets just invoke the merge logic here for simplicity in this pivot.
         
-        success, message = self.cloud_sync.restore_from_cloud()
+        self.config(cursor="wait")
+        self.update()
+        
+        success, temp_path, message = self.dropbox_sync.download_db_to_temp()
+        
+        if not success:
+            self.config(cursor="")
+            if "No backup found" in message:
+                confirm = messagebox.askyesno("First-Time Sync", 
+                    "No cloud backup found on Dropbox.\n\nWould you like to upload your local data as the initial cloud copy?")
+                if confirm:
+                    success_up, msg_up = self.dropbox_sync.upload_db()
+                    if success_up:
+                        messagebox.showinfo("Sync Initialized", "Initial upload complete!")
+                    else:
+                        messagebox.showerror("Upload Failed", msg_up)
+            else:
+                messagebox.showerror("Download Failed", message)
+            return
+
+        # Perform Merge
+        try:
+            from src.services.sync_merger import SyncMerger
+            from src.services.conflict_dialog import ConflictResolverDialog
+            from src.core.database import db # Singleton access
+            
+            # Setup Merger
+            resolver_dialog_provider = lambda conflict_data: ConflictResolverDialog(self.winfo_toplevel(), conflict_data).show()
+            merger = SyncMerger(db.db_path, temp_path, resolver_dialog_provider)
+            
+            stats = merger.perform_merge()
+            
+            # Cleanup temp
+            import os
+            try:
+                os.remove(temp_path)
+            except: 
+                pass
+
+            self.config(cursor="")
+            
+            summary = (
+                f"Sync Complete!\n\n"
+                f"Added: {stats['added']}\n"
+                f"Updated: {stats['updated']}\n"
+                f"Conflicts Resolved: {stats['conflicts_resolved']}\n"
+                f"Soft Deleted: {stats['soft_deleted']}"
+            )
+            messagebox.showinfo("Restore Successful", summary)
+            
+        except Exception as e:
+            self.config(cursor="")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Merge Failed", f"Error during merge: {e}")
+
+    def _create_checkpoint(self, cloud: bool = False):
+        """Create a data checkpoint snapshot."""
+        self.config(cursor="wait")
+        self.update()
+        
+        success, message = self.dropbox_sync.create_checkpoint(local=True, cloud=cloud)
+        
+        self.config(cursor="")
         if success:
-            messagebox.showinfo("Restore Complete", message + "\n\nPlease restart the application.")
+            messagebox.showinfo("Checkpoint Created", message)
         else:
-            messagebox.showerror("Restore Failed", message)
+            messagebox.showerror("Checkpoint Failed", message)
+
+    def _open_backup_folder(self):
+        """Open the local backups folder in explorer."""
+        import os
+        backup_dir = CONFIG_DIR / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(backup_dir))
+        
+
