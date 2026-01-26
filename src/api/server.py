@@ -5,9 +5,15 @@ Provides endpoints for browser extension and external integrations
 
 from flask import Flask, request, jsonify
 from src.core.database import FlashcardDatabase
-from src.services.llm_service import get_ollama_client, is_ollama_available
+from src.services.llm_service import get_ai_client, is_ai_available
 import json
 from datetime import datetime
+import sys
+import io
+
+# Ensure UTF-8 output on Windows
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 app = Flask(__name__)
 db = FlashcardDatabase()
@@ -27,7 +33,7 @@ def health():
     return jsonify({
         "status": "ok",
         "timestamp": datetime.now().isoformat(),
-        "ollama_available": is_ollama_available()
+        "ai_available": is_ai_available()
     })
 
 # Deck endpoints
@@ -211,21 +217,26 @@ def get_stats(deck_id):
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
-# Ollama AI endpoints (for browser extension)
-@app.route('/api/ollama/status', methods=['GET'])
-def ollama_status():
-    """Check Ollama availability."""
+# AI endpoints (Universal)
+@app.route('/api/ai/status', methods=['GET'])
+def ai_status():
+    """Check AI availability."""
     return jsonify({
-        "available": is_ollama_available(),
+        "available": is_ai_available(),
         "timestamp": datetime.now().isoformat()
     })
 
-@app.route('/api/ollama/define', methods=['POST'])
+# Legacy Ollama aliases
+@app.route('/api/ollama/status', methods=['GET'])
+def ollama_status():
+    return ai_status()
+
+@app.route('/api/ai/define', methods=['POST'])
 def define_word():
-    """Get word definition from Ollama with language context."""
+    """Get word definition from AI with language context."""
     try:
-        if not is_ollama_available():
-            return jsonify({"success": False, "error": "Ollama not available"}), 503
+        if not is_ai_available():
+            return jsonify({"success": False, "error": "AI Service not available"}), 503
         
         data = request.json
         word = data.get('word', '').strip()
@@ -235,11 +246,11 @@ def define_word():
         if not word:
             return jsonify({"success": False, "error": "Word is required"}), 400
         
-        client = get_ollama_client()
+        client = get_ai_client()
         
         # Create language-aware prompt
         prompt = f"Define the {language} word '{word}' in {explain_in}. Be concise."
-        definition = client.explain_grammar(prompt)
+        definition = client.generate_response(prompt)
         
         if definition:
             return jsonify({"success": True, "word": word, "definition": definition, "language": language})
@@ -248,30 +259,26 @@ def define_word():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
-@app.route('/api/ollama/explain', methods=['POST'])
+@app.route('/api/ollama/define', methods=['POST'])
+def define_word_legacy():
+    return define_word()
+
+@app.route('/api/ai/explain', methods=['POST'])
 def explain_grammar_api():
-    """Get grammar explanation from Ollama with language context."""
+    """Get grammar explanation from AI with language context."""
     try:
-        print('[OLLAMA] POST /ollama/explain - checking availability', flush=True)
-        
-        if not is_ollama_available():
-            print('[OLLAMA] Ollama not available', flush=True)
-            return jsonify({"success": False, "error": "Ollama not available"}), 503
+        if not is_ai_available():
+            return jsonify({"success": False, "error": "AI Service not available"}), 503
         
         data = request.json
-        print(f'[OLLAMA] Request data: {data}', flush=True)
-        
         topic = data.get('topic', '').strip()
         language = data.get('language', 'english').strip()
         explain_in = data.get('explain_in', 'english').strip()
         
-        print(f'[OLLAMA] topic={topic}, language={language}, explain_in={explain_in}', flush=True)
-        
         if not topic:
-            print('[OLLAMA] Topic is empty', flush=True)
             return jsonify({"success": False, "error": "Topic is required"}), 400
         
-        client = get_ollama_client()
+        client = get_ai_client()
         
         # Create language-aware prompt
         if language != explain_in:
@@ -279,21 +286,19 @@ def explain_grammar_api():
         else:
             enhanced_topic = topic
         
-        print(f'[OLLAMA] Calling explain_grammar with enhanced_topic...', flush=True)
-        # Use 240 second timeout for larger models like mistral (may take 30-60+ seconds on slow hardware)
-        explanation = client.explain_grammar(enhanced_topic, timeout=240)
+        # Use 240 second timeout for larger models
+        explanation = client.generate_response(enhanced_topic, timeout=240)
 
         if explanation:
-            print(f'[OLLAMA] Got explanation, returning success', flush=True)
             return jsonify({"success": True, "topic": topic, "explanation": explanation, "language": language})
         else:
-            print('[OLLAMA] explain_grammar returned empty', flush=True)
             return jsonify({"success": False, "error": "Could not explain topic"}), 400
     except Exception as e:
-        print(f'[OLLAMA] Exception: {str(e)}', flush=True)
-        import traceback
-        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route('/api/ollama/explain', methods=['POST'])
+def explain_grammar_api_legacy():
+    return explain_grammar_api()
 
 # Health check for browser extension
 @app.route('/api/extension/ping', methods=['GET'])
@@ -301,35 +306,32 @@ def extension_ping():
     """Simple ping for browser extension to check if API is running."""
     return jsonify({"status": "connected"})
 
-# Get available Ollama models
-@app.route('/api/ollama/models', methods=['GET'])
+@app.route('/api/ai/models', methods=['GET'])
 def get_models():
-    """Get list of available Ollama models."""
+    """Get list of available models."""
     try:
-        print('[OLLAMA] GET /ollama/models - fetching available models', flush=True)
-        client = get_ollama_client()
+        client = get_ai_client()
         models = client.get_available_models()
         current_model = client.model
-        
-        print(f'[OLLAMA] Found {len(models)} models, current model: {current_model}', flush=True)
         
         return jsonify({
             "success": True,
             "available": len(models) > 0,
             "models": models,
             "current_model": current_model,
-            "ollama_running": is_ollama_available()
+            "ai_running": is_ai_available()
         })
     except Exception as e:
-        print(f'[OLLAMA] Error getting models: {str(e)}', flush=True)
-        import traceback
-        traceback.print_exc()
         return jsonify({
             "success": False,
             "error": str(e),
             "available": False,
-            "ollama_running": False
+            "ai_running": False
         }), 503
+
+@app.route('/api/ollama/models', methods=['GET'])
+def get_models_legacy():
+    return get_models()
 
 # ===== IMPORTED CONTENT ENDPOINTS =====
 
@@ -360,13 +362,15 @@ def add_imported_content():
     try:
         print('\n[API] POST /api/imported called', flush=True)
         data = request.json
-        print(f'[API] Request JSON: {data}', flush=True)
+        print(f'[API] Request received', flush=True)
         
         content_type = data.get('content_type', 'word')
         content = data.get('content', '').strip()
         url = data.get('url', '').strip()
         
-        print(f'[API] Extracted: type={content_type}, content={content[:50]}, url={url}', flush=True)
+        # Safe logging without trying to print the actual Unicode content
+        content_length = len(content)
+        print(f'[API] Extracted: type={content_type}, content_length={content_length}, url_length={len(url)}', flush=True)
         
         if not content or not url:
             print('[API] ERROR: Missing content or URL', flush=True)
@@ -446,7 +450,7 @@ def get_imported_stats():
 
 if __name__ == '__main__':
     print("Starting Language Learning Suite API Server...")
-    print("API running on http://localhost:5000")
+    print("API running on http://0.0.0.0:5000")
     print("Available endpoints:")
     print("  GET  /api/health")
     print("  GET  /api/decks")
@@ -468,4 +472,6 @@ if __name__ == '__main__':
     print("  GET /api/imported/stats")
     print("\nPress Ctrl+C to stop")
     
-    app.run(host='localhost', port=5000, debug=False)
+    # Use 0.0.0.0 to bind to all interfaces and threaded=True for concurrent requests
+    # Browser extension will connect via localhost:5000
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

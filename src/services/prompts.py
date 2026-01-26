@@ -10,7 +10,12 @@ WORD_PROMPTS = {
         'native_template': (
             'Provide a professional language tutor\'s definition of "{word}" in {native_language}. '
             'Include: 1. Part of speech. 2. A clear definition. 3. Formality/register (e.g., polite, informal, archaic). '
-            '4. A brief "Memory Hook" or etymological note to help remember it.'
+            '4. A brief "Memory Hook" or etymological note to help remember it.\n\n'
+            '**Example Output:**\n'
+            '1. **Part of Speech**: Noun\n'
+            '2. **Definition**: Detailed definition here.\n'
+            '3. **Register**: Neutral/Polite.\n'
+            '4. **Memory Hook**: A mnemonic aid.'
         ),
         'study_template': (
             'Explain the word "{word}" in {study_language} using very simple language for a beginner. '
@@ -23,7 +28,11 @@ WORD_PROMPTS = {
         'native_template': (
             'Explain the usage and nuance of "{word}" in {native_language}. '
             'When is this word used vs. its synonyms? Are there regional or social nuances? '
-            'Provide context on formality/politeness levels if applicable.'
+            'Provide context on formality/politeness levels if applicable.\n\n'
+            '**Example Output:**\n'
+            '**Nuance**: Explain the subtle feeling of the word.\n'
+            '**Synonyms**: Compare with similar words (e.g., "This implies X, whereas Y implies Z").\n'
+            '**Usage**: Suitable for formal writing but not casual speech.'
         ),
         'study_template': (
             'Describe how to use "{word}" in {study_language} using simple, clear sentences. '
@@ -139,6 +148,7 @@ SENTENCE_PROMPTS = {
             '**Suggestions**: \n'
             '- If there is a distinct grammar pattern, append: <grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>\n'
             '- If there is a difficult word worth studying separately, append: <flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n\n'
+            '- Try to have at least 2 suggestions given if there are sufficient challenging points in the sentence.\n\n'
             '**Example Output:**\n'
             '**Translation**: "I want to go to the library."\n'
             '**Literal Breakdown**: 나는 (I) + 도서관에 (to library) + 가고 싶어요 (want to go)\n'

@@ -51,8 +51,8 @@ Total Reviews: {deck_stats['total_reviews']}  |  Accuracy: {deck_stats['overall_
         view_btn = ttk.Button(btn_frame, text="View All Cards", command=self.view_all_cards, style="Large.TButton")
         view_btn.pack(side="left", padx=10, fill="both", expand=True)
         
-        # Check logic for ollama later, for now conditional on controller
-        if hasattr(self.controller, 'is_ollama_available') and self.controller.is_ollama_available():
+        # Check logic for AI Service availability
+        if hasattr(self.controller, 'is_ai_available') and self.controller.is_ai_available():
             grammar_btn = ttk.Button(btn_frame, text="Grammar Help", command=self.show_grammar_help, style="Large.TButton")
             grammar_btn.pack(side="left", padx=10, fill="both", expand=True)
         

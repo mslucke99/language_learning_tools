@@ -95,3 +95,72 @@ class MoveItemDialog:
         if self.on_change: self.on_change()
         messagebox.showinfo("Success", "Item moved!")
         self.dialog.destroy()
+
+class DeckPickerDialog:
+    """Dialog to select a deck."""
+    def __init__(self, parent, db: FlashcardDatabase, title="Select Deck"):
+        self.db = db
+        self.selected_deck_id = None
+        self.selected_deck_name = None
+        
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title(title)
+        self.dialog.geometry("350x400")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        self.setup_ui()
+        
+        # Center
+        self.dialog.update_idletasks()
+        try:
+            x = parent.winfo_rootx() + (parent.winfo_width() - self.dialog.winfo_width()) // 2
+            y = parent.winfo_rooty() + (parent.winfo_height() - self.dialog.winfo_height()) // 2
+            self.dialog.geometry(f"+{x}+{y}")
+        except: pass
+        
+    def setup_ui(self):
+        ttk.Label(self.dialog, text="Choose a Deck:", font=("Arial", 10, "bold")).pack(pady=10)
+        
+        # Listbox with Scrollbar
+        frame = ttk.Frame(self.dialog)
+        frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        scroll = ttk.Scrollbar(frame)
+        self.lb = tk.Listbox(frame, yscrollcommand=scroll.set, font=("Arial", 10))
+        scroll.config(command=self.lb.yview)
+        
+        self.lb.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        
+        # Populate
+        decks = self.db.get_decks()
+        self.deck_map = {}
+        for d in decks:
+            display = f"{d['name']} ({d['total_cards']} cards)"
+            self.lb.insert("end", display)
+            self.deck_map[display] = d
+            
+        self.lb.bind("<Double-1>", lambda e: self.confirm())
+        
+        # Buttons
+        btn_frame = ttk.Frame(self.dialog)
+        btn_frame.pack(fill="x", pady=15)
+        
+        ttk.Button(btn_frame, text="Cancel", command=self.dialog.destroy).pack(side="right", padx=10)
+        ttk.Button(btn_frame, text="Select", command=self.confirm).pack(side="right", padx=5)
+        
+    def confirm(self):
+        sel = self.lb.curselection()
+        if not sel:
+            return
+            
+        item = self.lb.get(sel[0])
+        deck = self.deck_map[item]
+        self.selected_deck_id = deck['id']
+        self.selected_deck_name = deck['name']
+        self.dialog.destroy()
+        
+    def show(self):
+        self.dialog.wait_window()
+        return self.selected_deck_id

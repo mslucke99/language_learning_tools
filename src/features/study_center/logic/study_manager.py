@@ -25,17 +25,20 @@ from src.services.prompts import WORD_PROMPTS, SENTENCE_PROMPTS, WRITING_PROMPTS
 class StudyManager:
     """Manages study resources for imported words and sentences."""
     
-    def __init__(self, db: FlashcardDatabase, ollama_client: Optional[OllamaClient] = None):
+    def __init__(self, db: FlashcardDatabase, ai_client: Optional[object] = None):
         """
         Initialize the Study Manager.
         
         Args:
             db: FlashcardDatabase instance
-            ollama_client: OllamaClient for AI-powered definitions/explanations
+            ai_client: AI Service Client for definitions/explanations
         """
         self.db = db
-        self.ollama_client = ollama_client
-        
+        self.ai_client = ai_client
+    
+        # Load LLM Provider configuration
+        self._load_llm_config()
+    
         # Get user preferences
         self.native_language = self._get_setting('native_language', 'English')
         self.study_language = self._get_setting('study_language', 'Spanish')
@@ -43,12 +46,11 @@ class StudyManager:
         self.prefer_native_definitions = self._get_setting('prefer_native_definitions', 'true') == 'true'
         self.prefer_native_explanations = self._get_setting('prefer_native_explanations', 'false') == 'true'
         self.request_timeout = int(self._get_setting('request_timeout', '120'))
-        self.ollama_model = self._get_setting('ollama_model', '')
         self.preload_on_startup = self._get_setting('preload_on_startup', 'true') == 'true'
-        
-        # Ensure ollama client uses the configured model
-        if self.ollama_client and self.ollama_model:
-            self.ollama_client.set_model(self.ollama_model)
+    
+        # Ensure client uses the configured model
+        if self.ai_client and self.llm_model:
+            self.ai_client.set_model(self.llm_model)
             
         # Background Task Queue Setup
         self.task_queue = queue.Queue()
@@ -56,10 +58,6 @@ class StudyManager:
         self.active_tasks = {} # task_id -> task_info
         self.debug_logs = [] # list of {timestamp, type, prompt, raw_response, duration}
         self.stop_worker = False
-        
-        # Start worker thread
-        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
-        self.worker_thread.start()
         
         # Load default prompt templates from src/services/prompts.py
         from src.services import prompts
@@ -69,6 +67,10 @@ class StudyManager:
             'writing': prompts.WRITING_PROMPTS,
             'chat': prompts.CHAT_PROMPTS
         }
+        
+        # Start worker thread (At the very end to ensure all methods/attrs are ready)
+        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self.worker_thread.start()
 
     # ===== PROMPT MANAGEMENT =====
 
@@ -98,11 +100,101 @@ class StudyManager:
 
     def reset_all_prompts(self):
         """Remove all custom prompts."""
-        self.db.clear_settings_pattern("prompt:%")
+        cursor = self.db.conn.cursor()
+        cursor.execute("DELETE FROM study_settings WHERE setting_key LIKE 'prompt_%'")
+        self.db.conn.commit()
+
+    def _validate_model_compatibility(self, provider: str, model: str) -> str:
+        """Helper to ensure the model string is valid for the given provider."""
+        if not model:
+            return ""
+        if provider == "gemini" and not model.lower().startswith("gemini"):
+            return "gemini-1.5-flash"
+        if provider == "openai" and not (model.lower().startswith("gpt") or model.lower().startswith("o1") or model.lower().startswith("o3")):
+            return "gpt-4o-mini"
+        if provider == "ollama" and ("gpt" in model.lower() or "gemini" in model.lower()):
+            return "" # Ollama will use default or discover
+        return model
+
+    def _load_llm_config(self):
+        """Load the active LLM provider configuration."""
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT provider, base_url, default_model FROM llm_config WHERE is_active = 1")
+        row = cursor.fetchone()
+        
+        if row:
+            self.llm_provider = row[0]
+            self.llm_base_url = row[1]
+            self.llm_model = self._validate_model_compatibility(self.llm_provider, row[2])
+        else:
+            # Default to Ollama if nothing configured/active
+            self.llm_provider = "ollama"
+            self.llm_base_url = "http://localhost:11434"
+            self.llm_model = ""
+            
+        # Ensure client matches active config
+        from src.services.llm_service import get_ai_client
+        self.ai_client = get_ai_client(self.llm_provider, {
+            "base_url": self.llm_base_url,
+            "model": self.llm_model
+        })
 
     def _get_effective_prompt(self, category: str, prompt_id: str, template_type: str = 'template') -> str:
         """Internal helper to get the prompt to use for generation."""
         return self.get_custom_prompt(category, prompt_id, template_type)
+
+    def get_effective_prompt(self, category: str, prompt_id: str, template_type: str = 'template') -> str:
+        """Public access to effective prompt."""
+        return self._get_effective_prompt(category, prompt_id, template_type)
+
+    def update_llm_config(self, provider: str, model: str, base_url: str = None):
+        """Update and activate an LLM provider configuration."""
+        cursor = self.db.conn.cursor()
+        
+        # Deactivate all
+        cursor.execute("UPDATE llm_config SET is_active = 0")
+        
+        # Logic Fix: If switching providers and model is obviously mismatching, 
+        # use a sensible default for that provider.
+        if model:
+            if provider == "gemini" and not model.lower().startswith("gemini"):
+                model = "gemini-1.5-flash"
+            elif provider == "openai" and not (model.lower().startswith("gpt") or model.lower().startswith("o1") or model.lower().startswith("o3")):
+                model = "gpt-4o-mini"
+            elif provider == "ollama" and ("gpt" in model.lower() or "gemini" in model.lower()):
+                model = "" # Ollama will use default or discover
+        
+        # Check if provider exists
+        cursor.execute("SELECT id FROM llm_config WHERE provider = ?", (provider,))
+        row = cursor.fetchone()
+        
+        if row:
+            cursor.execute(
+                "UPDATE llm_config SET base_url = ?, default_model = ?, is_active = 1 WHERE id = ?",
+                (base_url, self._validate_model_compatibility(provider, model), row[0])
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO llm_config (provider, base_url, default_model, is_active) VALUES (?, ?, ?, 1)",
+                (provider, base_url, self._validate_model_compatibility(provider, model))
+            )
+            
+        self.db.conn.commit()
+        self._load_llm_config()
+
+    def get_provider_config(self, provider: str) -> dict:
+        """Get the saved configuration for a specific provider."""
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT base_url, default_model FROM llm_config WHERE provider = ?", (provider,))
+        row = cursor.fetchone()
+        if row:
+            return {"base_url": row[0], "model": row[1]}
+        return {"base_url": "", "model": ""}
+
+    @property
+    def ai_available(self) -> bool:
+        """Check if the AI service is configured and available."""
+        return self.ai_client is not None and self.ai_client.is_available()
 
     # ===== QUEUE MANAGEMENT =====
 
@@ -266,8 +358,11 @@ class StudyManager:
                 elif task_type == 'chat_message':
                     # Fetch current history for context
                     session_id = kwargs.get('session_id')
-                    if session_id:
+                    if session_id and 'current_history' not in kwargs:
                         kwargs['current_history'] = self.get_chat_messages(session_id)
+                    # Ensure current_history is always present (fallback to empty list)
+                    if 'current_history' not in kwargs:
+                        kwargs['current_history'] = []
                     success, result, suggestions = self.send_chat_message(**kwargs)
                 else:
                     success, result, suggestions = False, "Unknown task type", {}
@@ -371,16 +466,20 @@ class StudyManager:
         return self.request_timeout
     
     def set_ollama_model(self, model: str):
-        """Set the Ollama model to use."""
-        self._set_setting('ollama_model', model)
-        self.ollama_model = model
+        """Legacy setter for the current model."""
+        self.set_llm_model(model)
+        
+    def set_llm_model(self, model: str):
+        """Set the current AI model."""
+        self._set_setting('ollama_model', model) # Keep DB key for now
+        self.llm_model = model
         # Also update the client if available
-        if self.ollama_client:
-            self.ollama_client.set_model(model)
+        if self.ai_client:
+            self.ai_client.set_model(model)
     
     def get_ollama_model(self) -> str:
-        """Get the currently configured Ollama model."""
-        return self.ollama_model
+        """Legacy getter for current model."""
+        return getattr(self, 'llm_model', '')
 
     def set_preload_on_startup(self, enabled: bool):
         """Set whether to pre-load the model on app startup."""
@@ -391,11 +490,15 @@ class StudyManager:
         """Get whether pre-loading is enabled."""
         return self.preload_on_startup
     
-    def get_available_ollama_models(self) -> List[str]:
-        """Get list of available Ollama models."""
-        if self.ollama_client:
-            return self.ollama_client.get_available_models()
+    def get_available_models(self) -> List[str]:
+        """Get list of available models for current provider."""
+        if self.ai_client:
+            return self.ai_client.get_available_models()
         return []
+
+    def get_available_ollama_models(self) -> List[str]:
+        """Legacy alias for get_available_models."""
+        return self.get_available_models()
     
     
     # ========== IMPORTED CONTENT RETRIEVAL ==========
@@ -408,10 +511,10 @@ class StudyManager:
                    COUNT(wd.id) as has_definition, ic.collection_id
             FROM imported_content ic
             LEFT JOIN word_definitions wd ON ic.id = wd.imported_content_id
-            WHERE ic.content_type = 'word' AND (ic.language = ? OR ic.language IS NULL OR ic.language = '')
+            WHERE ic.content_type = 'word'
             GROUP BY ic.id
             ORDER BY ic.created_at DESC
-        """, (self.study_language,))
+        """)
         
         words = []
         for row in cursor.fetchall():
@@ -435,10 +538,10 @@ class StudyManager:
                    COUNT(se.id) as has_explanation, ic.collection_id
             FROM imported_content ic
             LEFT JOIN sentence_explanations se ON ic.id = se.imported_content_id
-            WHERE ic.content_type = 'sentence' AND (ic.language = ? OR ic.language IS NULL OR ic.language = '')
+            WHERE ic.content_type = 'sentence'
             GROUP BY ic.id
             ORDER BY ic.created_at DESC
-        """, (self.study_language,))
+        """)
         
         sentences = []
         for row in cursor.fetchall():
@@ -607,8 +710,8 @@ class StudyManager:
         }
         
         # Extract Flashcards: <flashcard word="TERM">DEF</flashcard>
-        # Regex handles attributes with single or double quotes
-        fc_pattern = r'<flashcard\s+word=[\'"](.*?)[\'"]>(.*?)</flashcard>'
+        # Regex handles attributes with single or double quotes and optional spaces
+        fc_pattern = r'<flashcard\s+word\s*=\s*[\'"](.*?)[\'"]>(.*?)</flashcard>'
         for match in re.finditer(fc_pattern, text, re.DOTALL | re.IGNORECASE):
             suggestions['flashcards'].append({
                 'word': match.group(1),
@@ -616,7 +719,7 @@ class StudyManager:
             })
             
         # Extract Grammar: <grammar_pattern title="TITLE">EXP</grammar_pattern>
-        gp_pattern = r'<grammar_pattern\s+title=[\'"](.*?)[\'"]>(.*?)</grammar_pattern>'
+        gp_pattern = r'<grammar_pattern\s+title\s*=\s*[\'"](.*?)[\'"]>(.*?)</grammar_pattern>'
         for match in re.finditer(gp_pattern, text, re.DOTALL | re.IGNORECASE):
             suggestions['grammar'].append({
                 'title': match.group(1),
@@ -643,8 +746,8 @@ class StudyManager:
         Returns:
             Tuple of (success: bool, content: str, suggestions: Dict)
         """
-        if not self.ollama_client or not self.ollama_client.is_available():
-            return False, "Ollama is not available", {}
+        if not self.ai_client or not self.ai_client.is_available():
+            return False, "AI service is not available", {}
         
         cursor = self.db.conn.cursor()
         cursor.execute("SELECT content FROM imported_content WHERE id = ?", (imported_content_id,))
@@ -663,7 +766,7 @@ class StudyManager:
         # Generate using Ollama
         try:
             start_time = time.time()
-            content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            content = self.ai_client.generate_response(prompt, timeout=self.request_timeout)
             duration = time.time() - start_time
             
             desc = f"Word {content_type}: '{word}'"
@@ -678,7 +781,7 @@ class StudyManager:
                     imported_content_id,
                     clean_content,
                     language,
-                    notes=f"Generated {content_type} by {self.ollama_client.model}"
+                    notes=f"Generated {content_type} by {self.ai_client.model}"
                 )
                 return True, clean_content, suggestions
             else:
@@ -723,7 +826,8 @@ class StudyManager:
                                 explanation_language: str = 'native',
                                 focus_area: str = 'all',
                                 grammar_notes: str = '',
-                                user_notes: str = '') -> int:
+                                user_notes: str = '',
+                                suggestions: Dict = None) -> int:
         """
         Add or update a sentence explanation.
         
@@ -756,22 +860,26 @@ class StudyManager:
         )
         existing = cursor.fetchone()
         
+        # Serialize suggestions to JSON
+        import json
+        suggestions_json = json.dumps(suggestions) if suggestions else None
+        
         if existing:
             cursor.execute("""
                 UPDATE sentence_explanations
                 SET explanation = ?, focus_area = ?, grammar_notes = ?, 
-                    user_notes = ?, last_updated = ?
+                    user_notes = ?, last_updated = ?, suggestions = ?
                 WHERE id = ?
-            """, (explanation, focus_area, grammar_notes, user_notes, now, existing[0]))
+            """, (explanation, focus_area, grammar_notes, user_notes, now, suggestions_json, existing[0]))
             explanation_id = existing[0]
         else:
             cursor.execute("""
                 INSERT INTO sentence_explanations
                 (imported_content_id, sentence, explanation, explanation_language, 
-                 focus_area, grammar_notes, user_notes, created_at, last_updated, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 focus_area, grammar_notes, user_notes, created_at, last_updated, source, suggestions)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (imported_content_id, sentence, explanation, explanation_language,
-                  focus_area, grammar_notes, user_notes, now, now, 'user'))
+                  focus_area, grammar_notes, user_notes, now, now, 'user', suggestions_json))
             explanation_id = cursor.lastrowid
         
         self.db.conn.commit()
@@ -795,7 +903,7 @@ class StudyManager:
         cursor = self.db.conn.cursor()
         cursor.execute("""
             SELECT id, sentence, explanation, explanation_language, focus_area,
-                   grammar_notes, user_notes, created_at, last_updated, source
+                   grammar_notes, user_notes, created_at, last_updated, source, suggestions
             FROM sentence_explanations
             WHERE imported_content_id = ? AND explanation_language = ?
         """, (imported_content_id, language))
@@ -805,7 +913,7 @@ class StudyManager:
             # Fallback: try to get any explanation for this sentence
             cursor.execute("""
                 SELECT id, sentence, explanation, explanation_language, focus_area,
-                       grammar_notes, user_notes, created_at, last_updated, source
+                       grammar_notes, user_notes, created_at, last_updated, source, suggestions
                 FROM sentence_explanations
                 WHERE imported_content_id = ?
                 LIMIT 1
@@ -813,6 +921,9 @@ class StudyManager:
             row = cursor.fetchone()
             if not row:
                 return None
+        
+        import json
+        suggestions = json.loads(row[10]) if row[10] else {'flashcards': [], 'grammar': []}
         
         return {
             'id': row[0],
@@ -824,7 +935,8 @@ class StudyManager:
             'user_notes': row[6],
             'created_at': row[7],
             'last_updated': row[8],
-            'source': row[9]
+            'source': row[9],
+            'suggestions': suggestions
         }
     
     def get_all_sentence_explanations(self, imported_content_id: int) -> List[Dict]:
@@ -868,8 +980,8 @@ class StudyManager:
         Returns:
             Tuple of (success: bool, explanation: str, suggestions: Dict)
         """
-        if not self.ollama_client or not self.ollama_client.is_available():
-            return False, "Ollama is not available", {}
+        if not self.ai_client or not self.ai_client.is_available():
+            return False, "AI service is not available", {}
         
         if focus_areas is None or len(focus_areas) == 0:
             focus_areas = ['all']
@@ -899,7 +1011,7 @@ class StudyManager:
                 
                 # Generate
                 start_time = time.time()
-                explanation = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+                explanation = self.ai_client.generate_response(prompt, timeout=self.request_timeout)
                 duration = time.time() - start_time
                 
                 desc = f"Sentence focus: {focus_area} for \"{sentence[:20]}...\""
@@ -926,13 +1038,14 @@ class StudyManager:
             if all_explanations:
                 combined_explanation = "\n\n".join(all_explanations)
                 
-                # Store the generated explanation (using first focus as primary)
+                # Store the generated explanation with suggestions
                 self.add_sentence_explanation(
                     imported_content_id,
                     combined_explanation,
                     language,
                     primary_focus,
-                    user_notes=f"Generated by {self.ollama_client.model} (focus: {', '.join(focus_areas)})"
+                    user_notes=f"Generated by {self.ai_client.model} (focus: {', '.join(focus_areas)})",
+                    suggestions=all_suggestions
                 )
                 return True, combined_explanation, all_suggestions
             else:
@@ -953,7 +1066,7 @@ class StudyManager:
         Returns:
             Tuple of (success: bool, answer: str)
         """
-        if not self.ollama_client or not self.ollama_client.is_available():
+        if not self.ai_client or not self.ai_client.is_available():
             return False, "Ollama is not available"
         
         # Get the sentence explanation
@@ -997,7 +1110,7 @@ Please provide a clear, helpful answer in {target_lang}. Reference the original 
         
         try:
             start_time = time.time()
-            answer = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            answer = self.ai_client.generate_response(prompt, timeout=self.request_timeout)
             duration = time.time() - start_time
             
             desc = f"Follow-up: {question[:30]}..."
@@ -1029,8 +1142,8 @@ Please provide a clear, helpful answer in {target_lang}. Reference the original 
         Returns:
             Tuple of (success: bool, content: str, suggestions: Dict)
         """
-        if not self.ollama_client or not self.ollama_client.is_available():
-            return False, "Ollama is not available", {}
+        if not self.ai_client or not self.ai_client.is_available():
+            return False, "AI service is not available", {}
         
         prompt = f"""You are a {self.study_language} language tutor. 
         
@@ -1059,7 +1172,7 @@ Any important exceptions or nuances.
         
         try:
             start_time = time.time()
-            content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            content = self.ai_client.generate_response(prompt, timeout=self.request_timeout)
             duration = time.time() - start_time
             
             desc = f"Grammar: {topic}"
@@ -1235,8 +1348,8 @@ Any important exceptions or nuances.
 
     def generate_writing_topic(self) -> Tuple[bool, str, Dict]:
         """Generate a creative writing topic using AI."""
-        if not self.ollama_client or not self.ollama_client.is_available():
-            return False, "Ollama is not available", {}
+        if not self.ai_client or not self.ai_client.is_available():
+            return False, "AI service is not available", {}
             
         prompt_template = self._get_effective_prompt('writing', 'generate_topic')
         prompt = prompt_template.format(
@@ -1245,7 +1358,7 @@ Any important exceptions or nuances.
         )
         
         try:
-            content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            content = self.ai_client.generate_response(prompt, timeout=self.request_timeout)
             if content:
                 return True, content, {}
             return False, "Failed to generate topic", {}
@@ -1254,8 +1367,8 @@ Any important exceptions or nuances.
 
     def grade_writing(self, user_writing: str, topic: str) -> Tuple[bool, str, Dict]:
         """Grade a user's writing composition and provide feedback."""
-        if not self.ollama_client or not self.ollama_client.is_available():
-            return False, "Ollama is not available", {}
+        if not self.ai_client or not self.ai_client.is_available():
+            return False, "AI service is not available", {}
             
         prompt_template = self._get_effective_prompt('writing', 'grade')
         prompt = prompt_template.format(
@@ -1267,7 +1380,7 @@ Any important exceptions or nuances.
         
         start_time = time.time()
         try:
-            content = self.ollama_client.generate_response(prompt, timeout=self.request_timeout)
+            content = self.ai_client.generate_response(prompt, timeout=self.request_timeout)
             duration = time.time() - start_time
             desc = f"Grading writing: {topic}"
             self._log_debug('grade_writing', prompt, content or "EMPTY", duration, description=desc)
@@ -1312,8 +1425,8 @@ Any important exceptions or nuances.
 
     def send_chat_message(self, session_id: int, user_message: str, current_history: List[Dict]) -> Tuple[bool, Dict, Dict]:
         """Send a message to the AI and process the response."""
-        if not self.ollama_client or not self.ollama_client.is_available():
-            return False, {"error": "Ollama is not available"}, {}
+        if not self.ai_client or not self.ai_client.is_available():
+            return False, {"error": "AI service is not available"}, {}
 
         # 1. Save User Message
         self.db.add_chat_message(session_id, 'user', user_message)
@@ -1340,7 +1453,7 @@ Any important exceptions or nuances.
         # 3. Generate Request
         start_time = time.time()
         try:
-            content = self.ollama_client.generate_response(full_prompt, timeout=self.request_timeout)
+            content = self.ai_client.generate_response(full_prompt, timeout=self.request_timeout)
             duration = time.time() - start_time
             desc = f"Chat message: {user_message[:30]}..."
             self._log_debug('chat_message', full_prompt, content or "EMPTY", duration, description=desc)

@@ -12,7 +12,7 @@ class GrammarBookViewFrame(ttk.Frame):
         self.study_manager = study_manager
         self.db = db
         self.embedded = embedded
-        self.ollama_available = study_manager.ollama_client is not None
+        self.ai_available = study_manager.ai_available
         
         self.current_grammar_id = None
         self.grammar_entries = []
@@ -98,7 +98,7 @@ class GrammarBookViewFrame(ttk.Frame):
         self.grammar_tags_var = tk.StringVar()
         ttk.Entry(tags_frame, textvariable=self.grammar_tags_var).pack(fill="x", pady=(2, 0))
         
-        if self.ollama_available:
+        if self.ai_available:
             ttk.Button(right_panel, text="✨ Generate Explanation from Title", command=self._generate_grammar_explanation).pack(anchor="w", pady=(0, 10))
             
         ttk.Label(right_panel, text="Content:", font=("Arial", 10, "bold")).pack(anchor="w")

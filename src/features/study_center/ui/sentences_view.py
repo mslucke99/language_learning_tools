@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox, scrolledtext
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header, bind_mousewheel
-from src.features.study_center.ui.dialogs import ManageCollectionsDialog, MoveItemDialog
+from src.features.study_center.ui.dialogs import ManageCollectionsDialog, MoveItemDialog, DeckPickerDialog
 
 class SentencesViewFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, db: FlashcardDatabase, embedded=False):
@@ -12,7 +12,7 @@ class SentencesViewFrame(ttk.Frame):
         self.study_manager = study_manager
         self.db = db
         self.embedded = embedded
-        self.ollama_available = study_manager.ollama_client is not None
+        self.ai_available = study_manager.ai_available
         
         self.current_sentence_id = None
         self.current_sentence_explanation_id = None # Track for follow-ups
@@ -76,6 +76,7 @@ class SentencesViewFrame(ttk.Frame):
         tree_btns.pack(fill="x", pady=5)
         ttk.Button(tree_btns, text="📁 New Folder", command=lambda: ManageCollectionsDialog(self, self.db, 'sentence', self._update_sentences_view)).pack(side="left", padx=2, fill="x", expand=True)
         ttk.Button(tree_btns, text="📂 Move Item", command=lambda: self._move_item_dialog()).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text="🔄 Refresh", command=self._refresh_data_manual).pack(side="left", padx=2, fill="x", expand=True)
         
         # RIGHT PANE: Detail & Editor
         right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
@@ -97,7 +98,7 @@ class SentencesViewFrame(ttk.Frame):
         
         ai_action_frame = ttk.Frame(tab_explanation)
         ai_action_frame.pack(fill="x")
-        if self.ollama_available:
+        if self.ai_available:
             ttk.Button(ai_action_frame, text="💬 Explain", command=self._generate_sentence_explanation).pack(side="left", padx=2)
         ttk.Button(ai_action_frame, text="Save", command=self._save_sentence_explanation).pack(side="right")
         
@@ -144,7 +145,7 @@ class SentencesViewFrame(ttk.Frame):
         self.sentences_data = self.study_manager.get_imported_sentences()
         self._update_sentences_view()
         
-        if self.ollama_available:
+        if self.ai_available:
              ttk.Button(left_pane, text="⚡ Batch Explain", command=self._start_batch_sentences).pack(fill="x", pady=5)
 
     def go_back(self):
@@ -234,6 +235,10 @@ class SentencesViewFrame(ttk.Frame):
             self.sentence_notes_text.insert(tk.END, explanation['user_notes'])
             self.current_sentence_explanation_id = explanation['id']
             self._load_followup_history()
+            
+            # Load suggestions if they exist
+            if 'suggestions' in explanation and explanation['suggestions']:
+                self._populate_suggestions(explanation['suggestions'])
         else:
             self.followup_history_text.config(state="normal")
             self.followup_history_text.delete(1.0, tk.END)
@@ -416,24 +421,42 @@ class SentencesViewFrame(ttk.Frame):
     def _add_suggestion(self, item, type_name):
         try:
             if type_name == 'word':
-                # Check for duplicate manually first (optional UI check)
-                existing = self.study_manager.db.find_flashcard_by_question(item['word'])
-                if existing:
-                    if not messagebox.askyesno("Duplicate", f"The word '{item['word']}' might already exist in deck '{existing[0]['deck_name']}'. Add anyway?"):
-                        return
-                
-                # Add content
-                content_id = self.study_manager.db.add_imported_content(
-                    'word', item['word'], 
-                    url="AI Suggestion", 
-                    title="Sentence Analysis", 
-                    language=self.study_manager.study_language
-                )
-                self.study_manager.add_word_definition(
-                    content_id, item['definition'], 
-                    definition_language=self.study_manager.native_language
-                )
-                messagebox.showinfo("Saved", f"Added '{item['word']}' to your collection.")
+                # Ask Destination
+                choice = messagebox.askyesnocancel("Add Word", f"Where should '{item['word']}' be saved?\n\nYes: Flashcard Deck\nNo: Vocabulary List (Study Center)")
+                if choice is None: return
+
+                if choice: # Yes -> Deck
+                    deck_id = DeckPickerDialog(self.winfo_toplevel(), self.db).show()
+                    if not deck_id: return
+                    
+                    # Check duplicate in deck
+                    existing = self.db.find_flashcard_in_deck(deck_id, item['word'])
+                    if existing:
+                        if not messagebox.askyesno("Duplicate", f"Card '{item['word']}' already in this deck. Add anyway?"):
+                            return
+                    
+                    self.db.add_flashcard(deck_id, item['word'], item['definition'])
+                    messagebox.showinfo("Saved", "Added flashcard to deck!")
+                    
+                else: # No -> Vocabulary List
+                    # Check for duplicate manually first (optional UI check)
+                    existing = self.study_manager.db.find_flashcard_by_question(item['word'])
+                    if existing:
+                        if not messagebox.askyesno("Duplicate", f"The word '{item['word']}' might already exist in deck '{existing[0]['deck_name']}'. Add anyway?"):
+                            return
+                    
+                    # Add content
+                    content_id = self.study_manager.db.add_imported_content(
+                        'word', item['word'], 
+                        url="AI Suggestion", 
+                        title="Sentence Analysis", 
+                        language=self.study_manager.study_language
+                    )
+                    self.study_manager.add_word_definition(
+                        content_id, item['definition'], 
+                        definition_language=self.study_manager.native_language
+                    )
+                    messagebox.showinfo("Saved", f"Added '{item['word']}' to your collection.")
                 
             elif type_name == 'grammar':
                 self.study_manager.db.add_grammar_entry(
@@ -448,4 +471,12 @@ class SentencesViewFrame(ttk.Frame):
             messagebox.showerror("Error", f"Failed to add item: {e}")
 
     def _start_batch_sentences(self):
-         pass
+        count = self.study_manager.batch_generate_sentences()
+        if count > 0:
+            messagebox.showinfo("Batch Started", f"Queued explanations for {count} sentences.\nUse 'Refresh' periodically to see updates.")
+        else:
+            messagebox.showinfo("Batch info", "No sentences found needing explanations.")
+
+    def _refresh_data_manual(self):
+        self.sentences_data = self.study_manager.get_imported_sentences()
+        self._update_sentences_view()

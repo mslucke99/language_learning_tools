@@ -42,6 +42,14 @@ class SyncMerger:
         print(f"  remote_db_path: {remote_db_path!r} (type: {type(remote_db_path)})")
         print(f"  last_sync_time: {last_sync_time!r} (type: {type(last_sync_time)})")
         
+        # Validate last_sync_time is not a function/callable (common mistake)
+        if callable(last_sync_time):
+            raise TypeError(
+                f"last_sync_time must be a string (ISO timestamp) or None, "
+                f"but got a callable: {last_sync_time!r}. "
+                f"Did you forget to call the method?"
+            )
+        
         self.local_conn = sqlite3.connect(local_db_path)
         self.local_conn.row_factory = sqlite3.Row
         self.remote_conn = sqlite3.connect(remote_db_path)
@@ -53,6 +61,7 @@ class SyncMerger:
         
         # Conflict handler callback (set by UI)
         self.on_conflict: Optional[callable] = None
+
     
     def close(self):
         self.local_conn.close()

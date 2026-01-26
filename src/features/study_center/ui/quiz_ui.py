@@ -15,7 +15,7 @@ class QuizUIFrame(ttk.Frame):
         
         # Initialize QuizManager
         timeout = study_manager.request_timeout if study_manager else 30
-        self.quiz_manager = QuizManager(db, study_manager.ollama_client, timeout=timeout)
+        self.quiz_manager = QuizManager(db, study_manager.ai_client, timeout=timeout)
         
         self.setup_ui()
         

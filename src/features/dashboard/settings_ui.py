@@ -16,8 +16,8 @@ class SettingsUI(ttk.Frame):
         self.controller = controller
         self.study_manager = study_manager
         
-        # Check Ollama
-        self.ollama_available = study_manager.ollama_client is not None and study_manager.ollama_client.is_available()
+        # Check AI Service connection
+        self.ai_available = study_manager.ai_client is not None and study_manager.ai_client.is_available()
         self.available_models = []
         
         # Initialize Dropbox Sync
@@ -30,6 +30,14 @@ class SettingsUI(ttk.Frame):
         self.timeout_var = tk.IntVar()
         self.preload_var = tk.BooleanVar()
         self.sync_status_var = tk.StringVar(value="Not connected")
+        
+        # LLM Provider Variables
+        self.provider_var = tk.StringVar(value="ollama")
+        self.api_key_var = tk.StringVar()
+        self.base_url_var = tk.StringVar()
+        
+        from src.services.llm_providers.security import KeyringManager
+        self.keyring = KeyringManager()
         
         if self.dropbox_sync.is_authenticated():
             self.sync_status_var.set("Connected to Dropbox ✅")
@@ -71,34 +79,71 @@ class SettingsUI(ttk.Frame):
         ttk.Label(gen_tab, text=tr("tip_languages", "Tip: Study language is what you are learning. Native language is used for definitions and UI."), 
                   font=("Arial", 9, "italic"), foreground="gray", wraplength=500).pack(anchor="w", pady=20)
         
-        # --- TAB 2: AI MODEL (Ollama) ---
+        # --- TAB 2: AI MODEL ---
         ai_tab = ttk.Frame(self.notebook, padding="20")
-        self.notebook.add(ai_tab, text=tr("tab_ai_model", "AI Model"))
+        self.notebook.add(ai_tab, text=tr("tab_ai_model", "🤖 AI Model"))
         
         status_frame = ttk.Frame(ai_tab)
         status_frame.pack(fill="x", pady=(0, 20))
         
-        status_lbl = "Connected ✅" if self.ollama_available else "Not Connected (Ollama not found) ❌"
-        ttk.Label(status_frame, text=f"Ollama Status: {status_lbl}", font=("Arial", 11, "bold")).pack(side="left")
+        self.ai_status_label = ttk.Label(status_frame, text="AI Status: Checking...", font=("Arial", 11, "bold"))
+        self.ai_status_label.pack(side="left")
+        
+        self._update_ai_status()
         
         ai_grid = ttk.Frame(ai_tab)
         ai_grid.pack(fill="x")
         
         ttk.Label(ai_grid, text="Default Model:").grid(row=0, column=0, sticky="w", pady=10)
-        self.model_combo = ttk.Combobox(ai_grid, textvariable=self.model_var, state="readonly", width=32)
-        self.model_combo.grid(row=0, column=1, sticky="w", padx=15)
+        model_frame = ttk.Frame(ai_grid)
+        model_frame.grid(row=0, column=1, sticky="w", padx=15)
         
-        if self.ollama_available:
-             try:
-                 self.available_models = self.study_manager.ollama_client.get_available_models()
-                 self.model_combo['values'] = self.available_models
-             except:
-                 self.model_combo['values'] = ["Error fetching models"]
+        self.model_combo = ttk.Combobox(model_frame, textvariable=self.model_var, state="readonly", width=32)
+        self.model_combo.pack(side="left")
+        
+        ttk.Button(model_frame, text="🔄", width=3, command=self._refresh_model_list).pack(side="left", padx=5)
+        
+        self._refresh_model_list()
         
         ttk.Label(ai_grid, text="Request Timeout (sec):").grid(row=1, column=0, sticky="w", pady=10)
         ttk.Spinbox(ai_grid, from_=5, to=300, increment=5, textvariable=self.timeout_var, width=10).grid(row=1, column=1, sticky="w", padx=15)
         
         ttk.Checkbutton(ai_tab, text="Pre-load model on application startup", variable=self.preload_var).pack(anchor="w", pady=15)
+        
+        # --- TAB 2.5: AI PROVIDERS ---
+        prov_tab = ttk.Frame(self.notebook, padding="20")
+        self.notebook.add(prov_tab, text="🤖 AI Providers")
+        
+        ttk.Label(prov_tab, text="Manage AI Backends", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        
+        prov_grid = ttk.Frame(prov_tab)
+        prov_grid.pack(fill="x")
+        
+        ttk.Label(prov_grid, text="AI Backend:").grid(row=0, column=0, sticky="w", pady=10)
+        self.prov_combo = ttk.Combobox(prov_grid, textvariable=self.provider_var, state="readonly", width=32,
+                                     values=["ollama", "openai", "gemini", "lm_studio", "llama_cpp", "openai_compatible"])
+        self.prov_combo.grid(row=0, column=1, sticky="w", padx=15)
+        self.prov_combo.bind("<<ComboboxSelected>>", self._on_provider_changed)
+        
+        # API Key (Masked)
+        self.lbl_key = ttk.Label(prov_grid, text="API Key:")
+        self.lbl_key.grid(row=1, column=0, sticky="w", pady=10)
+        self.ent_key = ttk.Entry(prov_grid, textvariable=self.api_key_var, width=35, show="*")
+        self.ent_key.grid(row=1, column=1, sticky="w", padx=15)
+        
+        # Base URL
+        self.lbl_url = ttk.Label(prov_grid, text="Base URL:")
+        self.lbl_url.grid(row=2, column=0, sticky="w", pady=10)
+        self.ent_url = ttk.Entry(prov_grid, textvariable=self.base_url_var, width=35)
+        self.ent_url.grid(row=2, column=1, sticky="w", padx=15)
+        
+        actions_fr = ttk.Frame(prov_tab)
+        actions_fr.pack(fill="x", pady=20)
+        ttk.Button(actions_fr, text="Test Connection", command=self._test_provider_connection).pack(side="left")
+        ttk.Button(actions_fr, text="Apply Backend", command=self._apply_provider_config, style="Accent.TButton").pack(side="left", padx=10)
+        
+        ttk.Label(prov_tab, text="Note: API keys are stored securely in your OS Credential Manager (Windows Vault/Keychain).", 
+                  font=("Arial", 9, "italic"), foreground="gray", wraplength=500).pack(anchor="w", pady=10)
         
         # --- TAB 3: PROMPTS (Tuning) ---
         prompt_tab = ttk.Frame(self.notebook, padding="20")
@@ -111,6 +156,9 @@ class SettingsUI(ttk.Frame):
         
         ttk.Button(prompt_tab, text="🎨 Open Advanced Prompt Editor", 
                    command=self.open_prompt_editor, style="Accent.TButton").pack(anchor="w", pady=10)
+        
+        ttk.Button(prompt_tab, text="↺ Reset All Prompts to Default", 
+                   command=self.reset_all_prompts).pack(anchor="w", pady=(0, 10))
         
         ttk.Label(prompt_tab, text="Tip: Use the editor to add specific instructions for your target language or to change the tone of the AI tutor.", 
                   font=("Arial", 9, "italic"), foreground="gray", wraplength=500).pack(anchor="w", pady=20)
@@ -200,6 +248,40 @@ class SettingsUI(ttk.Frame):
         editor = PromptEditorDialog(self.winfo_toplevel(), self.study_manager)
         editor.grab_set()
 
+    def _update_ai_status(self):
+        """Update the AI service status label."""
+        p_name = self.study_manager.llm_provider.title()
+        if self.study_manager.ai_client and self.study_manager.ai_client.is_available():
+            self.ai_status_label.config(text=f"{p_name} Status: Connected ✅", foreground="green")
+        else:
+            self.ai_status_label.config(text=f"{p_name} Status: Disconnected ❌", foreground="red")
+
+    def _refresh_model_list(self):
+        """Fetch available models from the current provider."""
+        if not self.study_manager.ai_client:
+            self.model_combo['values'] = ["No provider active"]
+            return
+            
+        def fetch():
+            try:
+                models = self.study_manager.ai_client.get_available_models()
+                self.available_models = models
+                self.model_combo['values'] = models
+                # If current selection is invalid, pick first
+                cur = self.model_var.get()
+                if models and cur not in models:
+                    self.model_var.set(models[0])
+            except Exception as e:
+                self.model_combo['values'] = ["Error fetching models"]
+                print(f"Model fetch error: {e}")
+                
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def reset_all_prompts(self):
+        if messagebox.askyesno("Confirm Reset", "This will revert ALL AI prompts to their factory defaults. This action cannot be undone.\n\nProceed?"):
+            self.study_manager.reset_all_prompts()
+            messagebox.showinfo("Reset Complete", "All prompts have been restored to defaults.")
+
     def load_settings(self):
         # Load from StudyManager / Database
         self.study_lang_var.set(self.study_manager.study_language)
@@ -210,6 +292,103 @@ class SettingsUI(ttk.Frame):
         
         self.timeout_var.set(self.study_manager.get_request_timeout())
         self.preload_var.set(self.study_manager.get_preload_on_startup())
+        
+        # Load Provider Config
+        self.provider_var.set(self.study_manager.llm_provider)
+        self.base_url_var.set(self.study_manager.llm_base_url or "")
+        # Load API key from keyring if possible
+        stored_key = self.keyring.get_api_key(self.study_manager.llm_provider)
+        self.api_key_var.set(stored_key if stored_key else "")
+        self._on_provider_changed(None, initial_load=True)
+
+    def _on_provider_changed(self, event, initial_load=False):
+        p = self.provider_var.get()
+        # Hide/Show fields based on provider
+        if p == "ollama":
+            self.lbl_key.grid_remove()
+            self.ent_key.grid_remove()
+            self.lbl_url.grid()
+            self.ent_url.grid()
+        elif p in ["openai", "gemini"]:
+            self.lbl_key.grid()
+            self.ent_key.grid()
+            self.lbl_url.grid_remove()
+            self.ent_url.grid_remove()
+        else: # compatible, studio, etc
+            self.lbl_key.grid()
+            self.ent_key.grid()
+            self.lbl_url.grid()
+            self.ent_url.grid()
+        
+        # Fresh API key for the new provider
+        stored_key = self.keyring.get_api_key(p)
+        self.api_key_var.set(stored_key if stored_key else "")
+        
+        # Load saved config (Base URL & Model) from DB for this provider
+        saved_config = self.study_manager.get_provider_config(p)
+        if saved_config['base_url']:
+            self.base_url_var.set(saved_config['base_url'])
+        else:
+            # Default base URLs if not saved
+            if p == "ollama": self.base_url_var.set("http://localhost:11434")
+            elif p == "lm_studio": self.base_url_var.set("http://localhost:1234/v1")
+            elif p == "llama_cpp": self.base_url_var.set("http://localhost:8080/v1")
+            else: self.base_url_var.set("") # Cloud providers usually don't need it or use defaults
+            
+        # Update model var with saved model (or empty if none)
+        # This prevents "Apply" from sending a leftover incompatible model string
+        if not initial_load:
+            self.model_var.set(saved_config['model'])
+            self.available_models = []
+            self.model_combo['values'] = [saved_config['model']] if saved_config['model'] else ["Switching..."]
+
+    def _test_provider_connection(self):
+        # Implementation of test logic
+        backend = self.provider_var.get()
+        url = self.base_url_var.get()
+        key = self.api_key_var.get()
+        
+        self.config(cursor="wait")
+        self.update()
+        
+        def run_test():
+             from src.services.llm_service import LLMService
+             # Store key temporarily in keyring for the test instance or pass it directly?
+             # For now, let's just use a fresh service instance
+             try:
+                 # Update keyring first if key provided
+                 if key: self.keyring.set_api_key(backend, key)
+                 
+                 test_service = LLMService(backend, {"base_url": url})
+                 if test_service.is_available():
+                     models = test_service.get_available_models()
+                     msg = f"Connection Successful! ✅\n\nFound models: {', '.join(models[:5])}"
+                     if len(models) > 5: msg += f" (+{len(models)-5} more)"
+                     messagebox.showinfo("Success", msg)
+                 else:
+                     messagebox.showerror("Failed", "Could not connect to the AI backend. Check URL and API Key.")
+             except Exception as e:
+                 messagebox.showerror("Error", f"Test failed: {e}")
+             finally:
+                 self.config(cursor="")
+        
+        threading.Thread(target=run_test, daemon=True).start()
+
+    def _apply_provider_config(self):
+        backend = self.provider_var.get()
+        url = self.base_url_var.get()
+        key = self.api_key_var.get()
+        
+        if key:
+            self.keyring.set_api_key(backend, key)
+            
+        self.study_manager.update_llm_config(backend, self.model_var.get(), url)
+        messagebox.showinfo("Applied", f"AI backend switched to {backend}. Model set to {self.model_var.get()}")
+        
+        # Refresh model list based on new backend
+        if self.study_manager.ai_client:
+            self.available_models = self.study_manager.ai_client.get_available_models()
+            self.model_combo['values'] = self.available_models
 
     def save_settings(self):
         try:
@@ -217,7 +396,7 @@ class SettingsUI(ttk.Frame):
             self.study_manager.set_native_language(self.native_lang_var.get().strip())
             self.study_manager.set_study_language(self.study_lang_var.get().strip())
             
-            self.study_manager.set_ollama_model(self.model_var.get())
+            self.study_manager.set_llm_model(self.model_var.get())
             self.study_manager.set_request_timeout(self.timeout_var.get())
             self.study_manager.set_preload_on_startup(self.preload_var.get())
             
@@ -305,10 +484,10 @@ class SettingsUI(ttk.Frame):
         # Perform Merge
         try:
             from src.services.sync_merger import SyncMerger
-            from src.services.conflict_dialog import ConflictResolverDialog
+            from src.services.conflict_dialog import show_conflict_dialog
             
             # Setup Merger
-            resolver_dialog_provider = lambda conflict_data: ConflictResolverDialog(self.winfo_toplevel(), conflict_data).show()
+            resolver_dialog_provider = lambda conflict_data: show_conflict_dialog(self.winfo_toplevel(), conflict_data)
             merger = SyncMerger(self.study_manager.db.db_path, temp_path)
             merger.on_conflict = resolver_dialog_provider
             

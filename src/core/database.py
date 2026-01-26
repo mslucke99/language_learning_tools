@@ -104,6 +104,17 @@ class FlashcardDatabase:
                 setting_value TEXT NOT NULL
             )
         """)
+
+        # Create llm_config table for multiple AI providers
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS llm_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL UNIQUE,
+                base_url TEXT,
+                default_model TEXT,
+                is_active INTEGER DEFAULT 0
+            )
+        """)
         
         # Create grammar_followups table for follow-up questions on sentence explanations
         cursor.execute("""
@@ -368,6 +379,14 @@ class FlashcardDatabase:
             if 'deleted_at' not in columns:
                 print(f"[DB] Migrating table {table}: adding deleted_at")
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT")
+
+        # 5. Add suggestions column to sentence_explanations for AI-generated flashcards/grammar
+        cursor.execute("PRAGMA table_info(sentence_explanations)")
+        columns = [info[1] for info in cursor.fetchall()]
+        
+        if 'suggestions' not in columns:
+            print("[DB] Migrating sentence_explanations: adding suggestions column")
+            cursor.execute("ALTER TABLE sentence_explanations ADD COLUMN suggestions TEXT")
 
         self.conn.commit()
 
@@ -635,7 +654,9 @@ class FlashcardDatabase:
                            title: str = "", context: str = "", language: str = "", 
                            tags: str = "") -> int:
         """Add imported content from browser extension."""
-        print(f'\n[DB] add_imported_content called: type={content_type}, content={content[:50]}...', flush=True)
+        # Safe logging without printing Unicode content that might crash on Windows
+        content_length = len(content)
+        print(f'\n[DB] add_imported_content called: type={content_type}, content_length={content_length}', flush=True)
         cursor = self.conn.cursor()
         try:
             print(f'[DB] Executing INSERT...', flush=True)

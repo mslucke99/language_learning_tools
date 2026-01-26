@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from src.core.database import FlashcardDatabase
-from src.services.llm_service import get_ollama_client, is_ollama_available
+from src.services.llm_service import get_ai_client, is_ai_available
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.import_export import ImportExportManager
 from src.core.localization import tr, set_locale
@@ -35,19 +35,19 @@ class DashboardApp:
         
         # Initialize Core Services
         self.db = FlashcardDatabase()
-        self.ollama_client = get_ollama_client()
-        self.ollama_available = is_ollama_available()
+        self.ai_client = get_ai_client()
+        self.ai_available = is_ai_available()
         
-        self.study_manager = StudyManager(self.db, self.ollama_client)
+        self.study_manager = StudyManager(self.db, self.ai_client)
         self.io_manager = ImportExportManager(self.db, self.study_manager)
         
         # Apply Persisted UI Locale
         set_locale(self.study_manager.ui_language)
         self.root.title(tr("app_title", "Language Learning Suite"))
         
-        # Pre-load Ollama if configured
-        if self.ollama_available and self.study_manager.get_preload_on_startup():
-             self._preload_ollama()
+        # Pre-load AI model if configured
+        if self.ai_available and self.study_manager.get_preload_on_startup():
+             self._preload_ai_model()
 
         # Styles
         style = ttk.Style()
@@ -71,11 +71,11 @@ class DashboardApp:
         # Start periodic updates
         self._update_status_bar()
         
-    def _preload_ollama(self):
+    def _preload_ai_model(self):
         import threading
         def _load():
             try:
-                self.ollama_client.get_available_models()
+                self.ai_client.get_available_models()
             except: pass
         threading.Thread(target=_load, daemon=True).start()
 
@@ -174,8 +174,8 @@ class DashboardApp:
 
     # --- Utils ---
     
-    def is_ollama_available(self):
-        return self.ollama_available
+    def is_ai_available(self):
+        return self.ai_available
         
     def show_grammar_help(self):
         self.show_grammar_book_view()
@@ -186,8 +186,8 @@ class DashboardApp:
         self.status_bar = ttk.Frame(self.root, relief="sunken", padding=(10, 2))
         self.status_bar.pack(side="bottom", fill="x")
         
-        self.ollama_status_label = ttk.Label(self.status_bar, text=tr("status_ollama_checking", "Ollama: Checking..."))
-        self.ollama_status_label.pack(side="left", padx=5)
+        self.ai_status_label = ttk.Label(self.status_bar, text="AI: Checking...")
+        self.ai_status_label.pack(side="left", padx=5)
         
         ttk.Separator(self.status_bar, orient="vertical").pack(side="left", fill="y", padx=10)
         
@@ -204,11 +204,25 @@ class DashboardApp:
         self.sync_btn.pack(side="right", padx=5)
         
     def _update_status_bar(self):
-        # Update Ollama Status
-        if self.ollama_available:
-            self.ollama_status_label.config(text=f"Ollama: {tr('status_online', 'Online')} ({self.study_manager.ollama_model or 'Default'})", foreground="green")
+        # Update AI Service Status
+        provider_type = self.study_manager.llm_provider
+        provider_name = provider_type.title()
+        
+        if self.study_manager.ai_available:
+            # Check for potential mismatch in background
+            active_model = self.study_manager.ai_client.model or "Default"
+            
+            # Smart logic: if Gemini is chosen but model is "qwen", show Offline until applied
+            # This prevents the confusing 'Gemini: Online (qwen3:4b)' look
+            is_mismatched = (provider_type == "gemini" and "gemini" not in active_model.lower()) or \
+                            (provider_type == "openai" and "gpt" not in active_model.lower() and "o1" not in active_model.lower() and "o3" not in active_model.lower())
+            
+            if is_mismatched:
+                self.ai_status_label.config(text=f"{provider_name}: {tr('status_updating', 'Syncing...')} ({active_model})", foreground="orange")
+            else:
+                self.ai_status_label.config(text=f"{provider_name}: {tr('status_online', 'Online')} ({active_model})", foreground="green")
         else:
-            self.ollama_status_label.config(text=f"Ollama: {tr('status_offline', 'Offline')}", foreground="red")
+            self.ai_status_label.config(text=f"{provider_name}: {tr('status_offline', 'Offline')}", foreground="red")
             
         # Update Queue Status
         q_status = self.study_manager.get_queue_status()
@@ -260,9 +274,9 @@ class DashboardApp:
 
             # 2. Merge
             from src.services.sync_merger import SyncMerger
-            from src.services.conflict_dialog import ConflictResolverDialog
+            from src.services.conflict_dialog import show_conflict_dialog
             
-            resolver = lambda data: ConflictResolverDialog(self.root, data).show()
+            resolver = lambda data: show_conflict_dialog(self.root, data)
             merger = SyncMerger(self.db.db_path, temp_path)
             merger.on_conflict = resolver
             

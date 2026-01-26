@@ -14,9 +14,9 @@ from datetime import datetime
 class QuizManager:
     """Manages quiz generation and scoring."""
     
-    def __init__(self, db: FlashcardDatabase, ollama_client: Optional[OllamaClient] = None, timeout: int = 30):
+    def __init__(self, db: FlashcardDatabase, ai_client: Optional[OllamaClient] = None, timeout: int = 30):
         self.db = db
-        self.ollama_client = ollama_client
+        self.ai_client = ai_client
         self.timeout = timeout
         
     def generate_quiz(self, source_type: str, source_id: int, count: int, difficulty: str) -> int:
@@ -114,7 +114,7 @@ class QuizManager:
         
     def _generate_distractors(self, correct_answer: str, difficulty: str, item_type: str) -> List[str]:
         """Generate plausible wrong answers using AI or fallback."""
-        if self.ollama_client and self.ollama_client.is_available():
+        if self.ai_client and self.ai_client.is_available():
             try:
                 prompt = f"""Generate 3 plausible but incorrect answers for this question.
 Correct answer: {correct_answer}
@@ -123,7 +123,7 @@ Type: {item_type}
 
 Provide only the 3 wrong answers, one per line. Make them believable distractors."""
                 
-                response = self.ollama_client.generate_response(prompt, timeout=self.timeout)
+                response = self.ai_client.generate_response(prompt, timeout=self.timeout)
                 if response:
                     distractors = [line.strip() for line in response.split('\n') if line.strip()][:3]
                     if len(distractors) == 3:
@@ -206,7 +206,7 @@ Provide only the 3 wrong answers, one per line. Make them believable distractors
     def generate_exam_questions(self, attempt_id: int, exam_name: str, level: str, section: str, count: int, 
                                study_lang: str, native_lang: str) -> bool:
         """Generate exam questions using AI and save to database."""
-        if not self.ollama_client or not self.ollama_client.is_available():
+        if not self.ai_client or not self.ai_client.is_available():
             return False
 
         template = EXAM_PROMPTS['generate_question']['template']
@@ -223,7 +223,7 @@ Provide only the 3 wrong answers, one per line. Make them believable distractors
                     focus_area=f"Question {i+1} of {count}"
                 )
                 
-                response = self.ollama_client.generate_response(prompt, timeout=self.timeout)
+                response = self.ai_client.generate_response(prompt, timeout=self.timeout)
                 if not response: continue
                 
                 # Cleanup potential markdown

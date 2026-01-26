@@ -4,6 +4,7 @@ import json
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header
+from src.features.study_center.ui.dialogs import DeckPickerDialog
 
 class WritingLabFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, embedded=False):
@@ -339,16 +340,41 @@ class WritingLabFrame(ttk.Frame):
         db = self.study_manager.db
         count = 0
         if type_name == 'word':
-            for item in suggestions.get('flashcards', []):
-                content_id = db.add_imported_content(
-                    'word', item['word'], url="Writing Lab Suggestion",
-                    title="AI Suggestion", language=self.study_manager.study_language
-                )
-                self.study_manager.add_word_definition(
-                    content_id, item['definition'], definition_language=self.study_manager.native_language
-                )
-                count += 1
-            messagebox.showinfo("Success", f"Added {count} words!")
+            items = suggestions.get('flashcards', [])
+            if not items: return
+            
+            # Ask Destination
+            choice = messagebox.askyesnocancel("Add Words", f"Save {len(items)} words to?\n\nYes: Flashcard Deck\nNo: Vocabulary List (Study Center)")
+            if choice is None: return
+
+            if choice: # Yes -> Deck
+                # writing_lab doesn't hold 'db' directly in self, but study_manager does
+                deck_id = DeckPickerDialog(self.winfo_toplevel(), db).show()
+                if not deck_id: return
+                
+                added_count = 0
+                for item in items:
+                    # Skip duplicates silently in batch to avoid spam
+                    if not db.find_flashcard_in_deck(deck_id, item['word']):
+                        db.add_flashcard(deck_id, item['word'], item['definition'])
+                        added_count += 1
+                
+                if added_count < len(items):
+                    messagebox.showinfo("Success", f"Added {added_count} cards to deck! ({len(items)-added_count} were duplicates)")
+                else:
+                    messagebox.showinfo("Success", f"Added all {added_count} cards to deck!")
+                    
+            else: # No -> Vocab List
+                for item in items:
+                    content_id = db.add_imported_content(
+                        'word', item['word'], url="Writing Lab Suggestion",
+                        title="AI Suggestion", language=self.study_manager.study_language
+                    )
+                    self.study_manager.add_word_definition(
+                        content_id, item['definition'], definition_language=self.study_manager.native_language
+                    )
+                    count += 1
+                messagebox.showinfo("Success", f"Added {count} words to vocabulary list!")
         else:
             for item in suggestions.get('grammar', []):
                  db.add_grammar_entry(item['title'], item['explanation'], language=self.study_manager.study_language)
