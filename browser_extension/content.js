@@ -13,6 +13,15 @@ let selectedContent = {
   url: ''
 };
 
+// Listen for messages from background script
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('[Content] Message from background:', request.action);
+  if (request.action === 'showNotification') {
+    showNotification(request.message, request.error);
+    sendResponse({ received: true });
+  }
+});
+
 // Detect text selection
 document.addEventListener('mouseup', function() {
   const selection = window.getSelection();

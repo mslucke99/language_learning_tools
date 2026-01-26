@@ -40,6 +40,9 @@ Here are the ones I am currently strongly considering:
 19c. The test exams could allow the user to select the specific topics they want to study for the exam or specific weak points they want to focus on.
 19d. The test exams should allow the user to select the number of questions they want to answer.
 19e. The test exams should allow the user to select the time limit they want to have for the exam.
+20. Separation by language the user is studying for items in the study center. This would allow the user to separate out items for different languages and stay organized if they are learning multiple languages.
+21. Add contextual example sentences to AI-suggested vocabulary items (Related Items tab) to help with in-context learning.
+
 
 
 
