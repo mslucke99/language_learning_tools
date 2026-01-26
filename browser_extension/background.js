@@ -44,7 +44,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 // Import content via API
 function importContent(text, type, tab) {
-  console.log('[BG] Importing:', { text: text.substring(0, 30), type, url: tab.url });
+  // Safe logging that won't crash on Unicode characters
+  console.log('[BG] Importing: type=' + type + ', length=' + text.length);
   // Verify API is available
   fetch(`${API_URL}/health`)
     .then(response => {
@@ -64,7 +65,7 @@ function importContent(text, type, tab) {
     })
     .then(res => res.json())
     .then(data => {
-      console.log('[BG] API success:', data);
+      console.log('[BG] API success: content_id=' + data.content_id);
       if (data.success) {
         // Notify user in content script
         chrome.tabs.sendMessage(tab.id, {
@@ -79,7 +80,7 @@ function importContent(text, type, tab) {
       }
     })
     .catch(error => {
-      console.error('[BG] Error:', error.message);
+      console.error('[BG] Error: ' + (error.message || 'Unknown error'));
       // Try to notify the tab
       chrome.tabs.sendMessage(tab.id, {
         action: 'showNotification',
@@ -96,7 +97,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log('[BG] Message from content:', request.action);
   if (request.action === 'importContent') {
     const content = request.content;
-    console.log('[BG] Importing from content:', content);
+    console.log('[BG] Importing from content: type=' + content.type + ', length=' + content.text.length);
     
     // Verify API is available
     fetch(`${API_URL}/health`)

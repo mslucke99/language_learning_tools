@@ -1,0 +1,85 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+# Python libraries are typically in venv or site-packages, 
+# so we don't need a global 'lib/' ignore which breaks Flutter.
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.venv/
+venv/
+ENV/
+
+# Database
+*.db
+*.sqlite3
+
+# Google OAuth credentials (NEVER commit these)
+credentials.json
+token.json
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.iml
+*.iws
+*.ipr
+.project
+.classpath
+.settings/
+*.swp
+*.swo
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+/android_companion/build/
+/android_companion/.dart_tool/
+
+# Android specific (inside android_companion/android)
+**/android/local.properties
+**/android/.gradle/
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+**/android/app/build/
+**/android/.kotlin/
+**/android/*.iml
+
+# iOS specific
+**/ios/.generated/
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/DerivedData/
+**/ios/Pods/
+
+# OS specific
+.DS_Store
+Thumbs.db
