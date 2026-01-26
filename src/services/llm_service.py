@@ -43,7 +43,7 @@ class LLMService:
             api_key = self.security.get_api_key("gemini")
             self.provider = GeminiProvider(
                 api_key=api_key,
-                model=self.config.get("model", "gemini-1.5-flash")
+                model=self.config.get("model")
             )
         elif p_type == "lm_studio":
             self.provider = OpenAICompatibleProvider(
@@ -64,6 +64,12 @@ class LLMService:
             )
         else:
             print(f"[LLM] Unknown provider type: {p_type}")
+
+    def update_config(self, provider_type: str, config: Dict):
+        """Update service configuration and re-initialize."""
+        self.provider_type = provider_type
+        self.config = config or {}
+        self._initialize_provider()
 
     def is_available(self) -> bool:
         return self.provider is not None and self.provider.is_available()
@@ -137,8 +143,10 @@ _ai_service: Optional[LLMService] = None
 def get_ai_client(provider_type: str = "ollama", config: Dict = None) -> LLMService:
     """Get or create the unified AI service instance."""
     global _ai_service
-    # Recreate if config changes or not yet initialized
-    _ai_service = LLMService(provider_type, config)
+    if _ai_service is None:
+        _ai_service = LLMService(provider_type, config)
+    else:
+        _ai_service.update_config(provider_type, config)
     return _ai_service
 
 def is_ai_available() -> bool:

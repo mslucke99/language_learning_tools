@@ -107,13 +107,21 @@ class StudyManager:
     def _validate_model_compatibility(self, provider: str, model: str) -> str:
         """Helper to ensure the model string is valid for the given provider."""
         if not model:
+            # Provide sensible fallback if no model saved
+            if provider == "gemini": return "gemini-1.5-flash"
+            if provider == "openai": return "gpt-4o-mini"
             return ""
-        if provider == "gemini" and not model.lower().startswith("gemini"):
+            
+        m_lower = model.lower()
+        if provider == "gemini":
+            if "gemini" in m_lower: return model
             return "gemini-1.5-flash"
-        if provider == "openai" and not (model.lower().startswith("gpt") or model.lower().startswith("o1") or model.lower().startswith("o3")):
+        if provider == "openai":
+            if any(x in m_lower for x in ["gpt", "o1", "o3"]): return model
             return "gpt-4o-mini"
-        if provider == "ollama" and ("gpt" in model.lower() or "gemini" in model.lower()):
-            return "" # Ollama will use default or discover
+        if provider == "ollama":
+            if any(x in m_lower for x in ["gpt", "gemini"]):
+                 return "" # Ollama will use default or discover
         return model
 
     def _load_llm_config(self):
@@ -127,10 +135,10 @@ class StudyManager:
             self.llm_base_url = row[1]
             self.llm_model = self._validate_model_compatibility(self.llm_provider, row[2])
         else:
-            # Default to Ollama if nothing configured/active
-            self.llm_provider = "ollama"
-            self.llm_base_url = "http://localhost:11434"
-            self.llm_model = ""
+            # Default to Gemini if nothing configured/active (Better default than Ollama for new users)
+            self.llm_provider = "gemini"
+            self.llm_base_url = ""
+            self.llm_model = "gemini-1.5-flash"
             
         # Ensure client matches active config
         from src.services.llm_service import get_ai_client
@@ -471,9 +479,17 @@ class StudyManager:
         
     def set_llm_model(self, model: str):
         """Set the current AI model."""
-        self._set_setting('ollama_model', model) # Keep DB key for now
         self.llm_model = model
-        # Also update the client if available
+        
+        # 1. Update legacy setting for backward compatibility
+        self._set_setting('ollama_model', model)
+        
+        # 2. Update active provider's config in DB
+        cursor = self.db.conn.cursor()
+        cursor.execute("UPDATE llm_config SET default_model = ? WHERE provider = ?", (model, self.llm_provider))
+        self.db.conn.commit()
+        
+        # 3. Update the client if available
         if self.ai_client:
             self.ai_client.set_model(model)
     

@@ -23,9 +23,87 @@ class QuizUIFrame(ttk.Frame):
         if not self.embedded:
             setup_standard_header(self, "📝 Quiz Yourself", back_cmd=self.go_back)
         
+        self.container = ttk.Frame(self)
+        self.container.pack(fill="both", expand=True)
+        
+        # Show Dashboard by default
+        self._show_dashboard()
+
+    def _show_dashboard(self):
+        """Show the history dashboard entry point."""
+        for widget in self.container.winfo_children():
+            widget.destroy()
+            
+        header_fr = ttk.Frame(self.container, padding=20)
+        header_fr.pack(fill="x")
+        
+        ttk.Label(header_fr, text="Quiz Dashboard", font=("Arial", 16, "bold")).pack(side="left")
+        ttk.Button(header_fr, text="✨ Start New Quiz", style="Accent.TButton", 
+                   command=self._show_quiz_setup).pack(side="right")
+        
+        # History Table
+        history_fr = ttk.LabelFrame(self.container, text="Quiz History", padding=10)
+        history_fr.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        
+        columns = ("date", "type", "difficulty", "score")
+        self.history_tree = ttk.Treeview(history_fr, columns=columns, show="headings", height=15)
+        
+        self.history_tree.heading("date", text="Date/Time")
+        self.history_tree.heading("type", text="Type")
+        self.history_tree.heading("difficulty", text="Difficulty")
+        self.history_tree.heading("score", text="Score")
+        
+        self.history_tree.column("date", width=180)
+        self.history_tree.column("type", width=120)
+        self.history_tree.column("difficulty", width=100)
+        self.history_tree.column("score", width=80, anchor="center")
+        
+        self.history_tree.pack(fill="both", expand=True, side="left")
+        
+        scrollbar = ttk.Scrollbar(history_fr, orient="vertical", command=self.history_tree.yview)
+        self.history_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(fill="y", side="right")
+        
+        self.history_tree.bind("<Double-1>", self._on_history_double_click)
+        
+        self._load_history()
+
+    def _load_history(self):
+        """Fetch history from manager and populate tree."""
+        for item in self.history_tree.get_children():
+            self.history_tree.delete(item)
+            
+        history = self.quiz_manager.get_quiz_history()
+        for h in history:
+            date_str = h['created_at'].replace('T', ' ')[:19]
+            self.history_tree.insert("", "end", iid=str(h['id']), values=(
+                date_str, 
+                h['source_type'].capitalize(),
+                h['difficulty'].capitalize(),
+                f"{h['score']}%"
+            ))
+
+    def _on_history_double_click(self, event):
+        item = self.history_tree.selection()
+        if item:
+            session_id = int(item[0])
+            self._review_quiz(session_id)
+
+    def _review_quiz(self, session_id):
+        """Open the review window for a session."""
+        QuizReviewWindow(self, self.quiz_manager, session_id, self.study_manager)
+
+    def _show_quiz_setup(self):
+        """Show the current setup UI."""
+        for widget in self.container.winfo_children():
+            widget.destroy()
+            
         # Quiz Options
-        options_frame = ttk.LabelFrame(self, text="Quiz Settings", padding="20")
+        options_frame = ttk.LabelFrame(self.container, text="New Quiz Settings", padding="20")
         options_frame.pack(fill="x", pady=20, padx=20)
+        
+        back_btn = ttk.Button(options_frame, text="◀ Back to History", command=self._show_dashboard)
+        back_btn.pack(anchor="e")
         
         ttk.Label(options_frame, text="Quiz Type:", font=("Arial", 11)).pack(anchor="w", pady=(0, 5))
         self.quiz_type_var = tk.StringVar(value="vocab")
@@ -104,12 +182,7 @@ class QuizUIFrame(ttk.Frame):
         count = self.count_var.get()
         difficulty = self.diff_var.get()
         
-        # In a real implementation we would fetch items based on type.
-        # For now, let's assume quiz_manager handles generation.
-        # We need to launch a Quiz Window.
-        
         try:
-             # Launch Quiz Session Window
              config = {
                  'type': quiz_type,
                  'count': count,
@@ -126,10 +199,214 @@ class QuizUIFrame(ttk.Frame):
                      'native_lang': self.study_manager.native_language if self.study_manager else "English"
                  })
                  
-             QuizSessionWindow(self, self.quiz_manager, config)
+             win = QuizSessionWindow(self, self.quiz_manager, config)
+             win.bind("<Destroy>", lambda e: self._show_dashboard()) # Refresh on close
              
         except Exception as e:
              messagebox.showerror("Error", f"Failed to start quiz: {e}")
+
+class QuizReviewWindow(tk.Toplevel):
+    def __init__(self, parent, quiz_manager, session_id, study_manager):
+        super().__init__(parent)
+        self.quiz_manager = quiz_manager
+        self.session_id = session_id
+        self.study_manager = study_manager
+        
+        self.title(f"Quiz Review: Session #{session_id}")
+        self.geometry("800x700")
+        
+        self.setup_ui()
+        self.load_data()
+
+    def setup_ui(self):
+        # Header
+        header = ttk.Frame(self, padding=20)
+        header.pack(fill="x")
+        
+        self.title_lbl = ttk.Label(header, text="Reviewing Session", font=("Arial", 16, "bold"))
+        self.title_lbl.pack(side="left")
+        
+        self.score_lbl = ttk.Label(header, text="Score: --%", font=("Arial", 14, "bold"))
+        self.score_lbl.pack(side="right")
+        
+        # Main Area (Two panels)
+        paned = ttk.PanedWindow(self, orient="horizontal")
+        paned.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Left: Question List
+        list_fr = ttk.Frame(paned, padding=5)
+        paned.add(list_fr, weight=2)
+        
+        ttk.Label(list_fr, text="Questions", font=("Arial", 10, "bold")).pack(anchor="w")
+        self.questions_tree = ttk.Treeview(list_fr, columns=("status", "question"), show="headings")
+        self.questions_tree.heading("status", text="Stat")
+        self.questions_tree.heading("question", text="Question")
+        self.questions_tree.column("status", width=50, anchor="center")
+        self.questions_tree.column("question", width=300)
+        self.questions_tree.pack(fill="both", expand=True)
+        self.questions_tree.bind("<<TreeviewSelect>>", self._on_question_select)
+        
+        # Right: AI Insights & Suggestions
+        insights_fr = ttk.Frame(paned, padding=5)
+        paned.add(insights_fr, weight=3)
+        
+        # Notebook for details and AI
+        self.tabs = ttk.Notebook(insights_fr)
+        self.tabs.pack(fill="both", expand=True)
+        
+        # Tab 1: Question Details
+        self.detail_tab = ttk.Frame(self.tabs, padding=15)
+        self.tabs.add(self.detail_tab, text="🔍 Details")
+        
+        self.detail_text = tk.Text(self.detail_tab, wrap="word", font=("Arial", 11), height=10)
+        self.detail_text.pack(fill="both", expand=True)
+        self.detail_text.config(state="disabled")
+        
+        # Tab 2: AI Analysis
+        self.ai_tab = ttk.Frame(self.tabs, padding=15)
+        self.tabs.add(self.ai_tab, text="🤖 AI Analysis")
+        
+        self.analysis_btn = ttk.Button(self.ai_tab, text="✨ Analyze My Performance", 
+                                      command=self._generate_analysis)
+        self.analysis_btn.pack(pady=10)
+        
+        self.analysis_text = tk.Text(self.ai_tab, wrap="word", font=("Arial", 11), height=15)
+        self.analysis_text.pack(fill="both", expand=True)
+        
+        # Suggestions bar (at bottom of AI tab)
+        self.sugg_frame = ttk.Frame(self.ai_tab)
+        self.sugg_frame.pack(fill="x", pady=10)
+
+    def load_data(self):
+        data = self.quiz_manager.get_session_details(self.session_id)
+        if not data: return
+        
+        self.session_data = data
+        self.title_lbl.config(text=f"Quiz Review: {data['source_type'].capitalize()} ({data['created_at'][:16]})")
+        self.score_lbl.config(text=f"Score: {data['score']}%")
+        
+        for q in data['questions']:
+            status = "✅" if q['is_correct'] else "❌"
+            self.questions_tree.insert("", "end", iid=str(q['id']), values=(status, q['question_text']))
+
+    def _on_question_select(self, event):
+        item = self.questions_tree.selection()
+        if not item: return
+        q_id = int(item[0])
+        q = next((x for x in self.session_data['questions'] if x['id'] == q_id), None)
+        if not q: return
+        
+        self.detail_text.config(state="normal")
+        self.detail_text.delete("1.0", "end")
+        
+        self.detail_text.insert("end", f"QUESTION:\n{q['question_text']}\n\n", "bold")
+        self.detail_text.insert("end", f"YOUR ANSWER: {q['user_answer']}\n", "red" if not q['is_correct'] else "green")
+        self.detail_text.insert("end", f"CORRECT ANSWER: {q['correct_answer']}\n\n", "green")
+        
+        if q.get('explanation'):
+             self.detail_text.insert("end", f"EXPLANATION:\n{q['explanation']}")
+             
+        self.detail_text.config(state="disabled")
+
+    def _generate_analysis(self):
+        self.analysis_btn.config(state="disabled", text="⌛ Analyzing...")
+        self.analysis_text.delete("1.0", "end")
+        self.analysis_text.insert("end", "AI is analyzing your performance. This may take 10-20 seconds...\n")
+        self.update()
+        
+        def run():
+            try:
+                study_lang = self.study_manager.study_language
+                native_lang = self.study_manager.native_language
+                
+                response = self.quiz_manager.generate_performance_analysis(
+                    self.session_id, study_lang, native_lang
+                )
+                
+                if not response:
+                    self._update_analysis_ui("Could not get AI feedback. Please check your connection.")
+                    return
+                
+                # Parse structured response
+                import re, json
+                
+                def extract(tag, text):
+                    m = re.search(f"<{tag}>(.*?)</{tag}>", text, re.DOTALL | re.IGNORECASE)
+                    return m.group(1).strip() if m else ""
+                
+                analysis = extract("analysis", response)
+                tips = extract("tips", response)
+                suggestions_raw = extract("suggestions", response)
+                
+                full_report = f"### PERFORMANCE ANALYSIS\n{analysis}\n\n### ACTIONABLE TIPS\n{tips}"
+                
+                # Update text area
+                self._update_analysis_ui(full_report)
+                
+                # Parse suggestions list
+                if suggestions_raw:
+                    try:
+                        # Find potential json within block
+                        json_match = re.search(r"(\[.*\])", suggestions_raw, re.DOTALL)
+                        if json_match:
+                            suggestions = json.loads(json_match.group(1))
+                            self._display_suggestions(suggestions)
+                    except Exception as e:
+                        print(f"Error parsing suggestions: {e}")
+                        
+            except Exception as e:
+                self._update_analysis_ui(f"An error occurred during analysis: {e}")
+            finally:
+                self.analysis_btn.config(state="normal", text="✨ Re-Analyze Performance")
+        
+        import threading
+        threading.Thread(target=run, daemon=True).start()
+
+    def _update_analysis_ui(self, text):
+        self.analysis_text.delete("1.0", "end")
+        self.analysis_text.insert("end", text)
+        
+    def _display_suggestions(self, suggestions):
+        # Clear existing
+        for w in self.sugg_frame.winfo_children(): w.destroy()
+        
+        if not suggestions: return
+        
+        ttk.Label(self.sugg_frame, text="Recommended for Study:", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        
+        for item in suggestions:
+            row = ttk.Frame(self.sugg_frame)
+            row.pack(fill="x", pady=2)
+            
+            label = f"[{item.get('type', 'item')}] {item.get('item')}: {item.get('definition')}"
+            ttk.Label(row, text=label, wraplength=500).pack(side="left", padx=5)
+            
+            # Action button
+            if item.get('type') == 'vocab':
+                ttk.Button(row, text="➕ Add Word", width=12, 
+                           command=lambda i=item: self._add_vocab_sugg(i)).pack(side="right")
+            else:
+                ttk.Button(row, text="✨ Save Pattern", width=12, 
+                           command=lambda i=item: self._add_grammar_sugg(i)).pack(side="right")
+
+    def _add_vocab_sugg(self, item):
+        word = item['item']
+        definition = item['definition']
+        
+        from src.features.study_center.ui.dialogs import DeckPickerDialog
+        dialog = DeckPickerDialog(self, self.db)
+        self.wait_window(dialog)
+        
+        if dialog.selected_deck_id:
+            deck_id = dialog.selected_deck_id
+            self.db.add_flashcard(deck_id, word, definition)
+            messagebox.showinfo("Success", f"Added '{word}' to deck!")
+
+    def _add_grammar_sugg(self, item):
+        title = item['item']
+        content = item['definition']
+        self.db.add_grammar_entry(title, content, tags="quiz-suggestion")
+        messagebox.showinfo("Success", f"Saved '{title}' to Grammar Book!")
 
 class QuizSessionWindow(tk.Toplevel):
     def __init__(self, parent, quiz_manager, config):

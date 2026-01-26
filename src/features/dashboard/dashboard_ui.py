@@ -35,10 +35,10 @@ class DashboardApp:
         
         # Initialize Core Services
         self.db = FlashcardDatabase()
-        self.ai_client = get_ai_client()
-        self.ai_available = is_ai_available()
+        self.study_manager = StudyManager(self.db)
+        self.ai_client = self.study_manager.ai_client
+        self.ai_available = self.study_manager.ai_available
         
-        self.study_manager = StudyManager(self.db, self.ai_client)
         self.io_manager = ImportExportManager(self.db, self.study_manager)
         
         # Apply Persisted UI Locale

@@ -168,26 +168,99 @@ Provide only the 3 wrong answers, one per line. Make them believable distractors
         
         return is_correct == 1
         
-    def calculate_score(self, session_id: int) -> Dict:
-        """Calculate final score for a session."""
-        cursor = self.db.conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM quiz_questions WHERE session_id = ? AND is_correct = 1", (session_id,))
-        correct_count = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT total_questions FROM quiz_sessions WHERE id = ?", (session_id,))
-        total = cursor.fetchone()[0]
-        
-        score = int((correct_count / total) * 100) if total > 0 else 0
-        
-        # Update session
-        cursor.execute("UPDATE quiz_sessions SET score = ? WHERE id = ?", (score, session_id))
-        self.db.conn.commit()
-        
         return {
             'score': score,
             'correct': correct_count,
             'total': total
         }
+
+    def get_quiz_history(self) -> List[Dict]:
+        """Fetch past quiz sessions."""
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            SELECT id, source_type, created_at, score, total_questions, difficulty 
+            FROM quiz_sessions 
+            ORDER BY created_at DESC
+        """)
+        cols = [desc[0] for desc in cursor.description]
+        return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def get_session_details(self, session_id: int) -> Dict:
+        """Get full details for a session including questions."""
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT * FROM quiz_sessions WHERE id = ?", (session_id,))
+        session_row = cursor.fetchone()
+        if not session_row: return {}
+        
+        cols = [desc[0] for desc in cursor.description]
+        session_data = dict(zip(cols, session_row))
+        
+        # Get questions
+        session_data['questions'] = self.get_quiz_questions(session_id)
+        return session_data
+
+    def finalize_exam_attempt(self, attempt_id: int) -> Dict:
+        """Calculate and save final exam score."""
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM exam_questions WHERE attempt_id = ? AND is_correct = 1", (attempt_id,))
+        correct = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT total_questions FROM exam_attempts WHERE id = ?", (attempt_id,))
+        total = cursor.fetchone()[0]
+        
+        score = int((correct / total) * 100) if total > 0 else 0
+        cursor.execute("UPDATE exam_attempts SET score = ? WHERE id = ?", (score, attempt_id))
+        self.db.conn.commit()
+        
+        return {'score': score, 'correct': correct, 'total': total}
+
+    def generate_performance_analysis(self, session_id: int, study_lang: str, native_lang: str) -> Optional[str]:
+        """Generate AI feedback based on quiz performance."""
+        if not self.ai_client or not self.ai_client.is_available():
+            return None
+            
+        details = self.get_session_details(session_id)
+        if not details or not details.get('questions'):
+            return None
+            
+        # Filter for mistakes
+        mistakes = [q for q in details['questions'] if not q['is_correct']]
+        
+        if not mistakes:
+            return "Perfect score! You have a solid grasp of these items. Keep up the great work!"
+            
+        # Build prompt
+        mistakes_text = ""
+        for i, m in enumerate(mistakes[:10]): # Limit to first 10 mistakes for prompt size
+            mistakes_text += f"{i+1}. Question: {m['question_text']}\n   Your Answer: {m['user_answer']}\n   Correct: {m['correct_answer']}\n\n"
+            
+        prompt = f"""You are a {study_lang} language tutor. 
+The student took a quiz and made some mistakes. Analyze their performance and provide helpful, encouraging feedback.
+
+Mistakes made:
+{mistakes_text}
+
+Please provide your response in the following format:
+
+<analysis>
+A brief analysis of their weak points (patterns you notice).
+</analysis>
+
+<tips>
+3 actionable tips for improvement.
+</tips>
+
+<suggestions>
+[
+  {{"type": "vocab", "item": "Word", "definition": "Translation/Meaning"}},
+  {{"type": "grammar", "item": "Pattern/Rule", "definition": "Explanation"}}
+]
+</suggestions>
+
+Use {native_lang} for your feedback. Ensure the suggestions are relevant to the mistakes made.
+"""
+        
+        return self.ai_client.generate_response(prompt, timeout=self.timeout)
 
     # --- EXAM PRACTICE MODE ---
 
