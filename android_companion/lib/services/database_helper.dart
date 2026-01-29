@@ -294,4 +294,58 @@ class DatabaseHelper {
       whereArgs: [id],
     );
   }
+
+  // ===== SYNC UTILITIES =====
+
+  Future<List<Map<String, dynamic>>> getModifiedRowsSince(
+    String table,
+    String timestamp,
+  ) async {
+    final db = await database;
+    return await db.query(
+      table,
+      where: 'last_modified > ?',
+      whereArgs: [timestamp],
+    );
+  }
+
+  Future<void> upsertRows(String table, List<Map<String, dynamic>> rows) async {
+    final db = await database;
+    final batch = db.batch();
+
+    for (var row in rows) {
+      final uuid = row['uuid'];
+
+      // Check if exists
+      // Note: This is an extra query per item.
+      // Optimization: Get all local UUIDs first or use INSERT OR REPLACE if exact match?
+      // But we need to handle conflict resolution (last_modified check).
+
+      final existing = await db.query(
+        table,
+        where: 'uuid = ?',
+        whereArgs: [uuid],
+      );
+
+      if (existing.isEmpty) {
+        batch.insert(table, row, conflictAlgorithm: ConflictAlgorithm.replace);
+      } else {
+        final localRow = existing.first;
+        final localModified = localRow['last_modified'] as String?;
+        final remoteModified = row['last_modified'] as String?;
+
+        // Simple Conflict Resolution: Last Modified Wins (or Remote wins if newer)
+        // Note: For equal timestamps (unlikely), we do nothing.
+
+        if (localModified == null ||
+            (remoteModified != null &&
+                remoteModified.compareTo(localModified) > 0)) {
+          // Remote is newer
+          batch.update(table, row, where: 'uuid = ?', whereArgs: [uuid]);
+        }
+        // Else: Local is newer, keep local.
+      }
+    }
+    await batch.commit(noResult: true);
+  }
 }

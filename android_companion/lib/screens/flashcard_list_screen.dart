@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../services/database_helper.dart';
+import '../services/llm_service.dart';
+import '../services/prompts.dart';
 
 class FlashcardListScreen extends StatefulWidget {
   final int deckId;
@@ -77,50 +80,108 @@ class _FlashcardListScreenState extends State<FlashcardListScreen> {
     final answerController = TextEditingController(
       text: isEditing ? card['answer'] : '',
     );
+    bool isGenerating = false;
 
     await showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(isEditing ? 'Edit Flashcard' : 'Add Flashcard'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: questionController,
-              decoration: const InputDecoration(labelText: 'Question'),
-              maxLines: 2,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(isEditing ? 'Edit Flashcard' : 'Add Flashcard'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: questionController,
+                      decoration: const InputDecoration(
+                        labelText: 'Word/Sentence',
+                      ),
+                      maxLines: 2,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: isGenerating
+                        ? null
+                        : () async {
+                            final word = questionController.text.trim();
+                            if (word.isEmpty) return;
+
+                            setDialogState(() => isGenerating = true);
+                            try {
+                              final llmService = Provider.of<LLMService>(
+                                context,
+                                listen: false,
+                              );
+                              final prompt = Prompts.format(
+                                Prompts.wordPrompts['definition']!['native']!,
+                                {
+                                  'word': word,
+                                  'native_language': 'English', // TODO
+                                },
+                              );
+                              final result = await llmService.generate(prompt);
+                              if (result != null) {
+                                answerController.text = result;
+                              }
+                            } finally {
+                              setDialogState(() => isGenerating = false);
+                            }
+                          },
+                    icon: isGenerating
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.auto_awesome, color: Colors.teal),
+                    tooltip: "AI Generate Definition",
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: answerController,
+                decoration: const InputDecoration(
+                  labelText: 'Definition/Answer',
+                ),
+                maxLines: 4,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
             ),
-            TextField(
-              controller: answerController,
-              decoration: const InputDecoration(labelText: 'Answer'),
-              maxLines: 2,
+            ElevatedButton(
+              onPressed: isGenerating
+                  ? null
+                  : () async {
+                      final data = {
+                        'question': questionController.text,
+                        'answer': answerController.text,
+                        'deck_id': widget.deckId,
+                      };
+
+                      if (isEditing) {
+                        await _dbHelper.updateItem(
+                          'flashcards',
+                          card['id'],
+                          data,
+                        );
+                      } else {
+                        await _dbHelper.insertItem('flashcards', data);
+                      }
+                      if (mounted) Navigator.pop(context);
+                      _loadCards();
+                    },
+              child: Text(isEditing ? 'Save' : 'Add'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final data = {
-                'question': questionController.text,
-                'answer': answerController.text,
-                'deck_id': widget.deckId,
-              };
-
-              if (isEditing) {
-                await _dbHelper.updateItem('flashcards', card['id'], data);
-              } else {
-                await _dbHelper.insertItem('flashcards', data);
-              }
-              if (mounted) Navigator.pop(context);
-              _loadCards();
-            },
-            child: Text(isEditing ? 'Save' : 'Add'),
-          ),
-        ],
       ),
     );
   }

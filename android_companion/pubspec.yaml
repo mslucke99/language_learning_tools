@@ -41,6 +41,17 @@ dependencies:
   # Database
   sqflite: ^2.3.0
   path: ^1.8.3
+  
+  # Firebase
+  firebase_core: ^2.15.1
+  cloud_firestore: ^4.9.1
+  firebase_auth: ^4.7.3
+
+  # AI
+  google_generative_ai: ^0.4.0
+
+  # Auth
+  google_sign_in: ^6.1.5
 
   # Dropbox Sync
   url_launcher: ^6.1.11
