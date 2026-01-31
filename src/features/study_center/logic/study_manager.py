@@ -1430,6 +1430,10 @@ Any important exceptions or nuances.
     def create_chat_session(self, topic: str) -> int:
         """Create a new chat session."""
         return self.db.create_chat_session(topic, self.study_language)
+    
+    def create_roleplay_chat_session(self, scenario_id: int, character_context: Optional[str] = None) -> int:
+        """Create a new roleplay chat session."""
+        return self.db.create_roleplay_chat_session(scenario_id, self.study_language, character_context)
 
     def get_chat_sessions(self) -> List[Dict]:
         """Get list of chat sessions."""
@@ -1438,6 +1442,42 @@ Any important exceptions or nuances.
     def get_chat_messages(self, session_id: int) -> List[Dict]:
         """Get all messages for a session."""
         return self.db.get_chat_messages(session_id)
+    
+    # ========== ROLEPLAY SCENARIO MANAGEMENT ==========
+    
+    def create_roleplay_scenario(self, name: str, description: str, user_role: str, situation: str, characters: List[Dict]) -> int:
+        """Create a new roleplay scenario. characters is a list of dicts with name, role, personality."""
+        import json
+        characters_json = json.dumps(characters)
+        return self.db.create_roleplay_scenario(name, description, user_role, situation, characters_json)
+    
+    def get_roleplay_scenarios(self) -> List[Dict]:
+        """Get all roleplay scenarios."""
+        import json
+        scenarios = self.db.get_roleplay_scenarios()
+        for scenario in scenarios:
+            if scenario['characters']:
+                scenario['characters'] = json.loads(scenario['characters'])
+        return scenarios
+    
+    def get_roleplay_scenario(self, scenario_id: int) -> Optional[Dict]:
+        """Get a specific roleplay scenario by ID."""
+        import json
+        scenario = self.db.get_roleplay_scenario(scenario_id)
+        if scenario and scenario['characters']:
+            scenario['characters'] = json.loads(scenario['characters'])
+        return scenario
+    
+    def update_roleplay_scenario(self, scenario_id: int, name: str = None, description: str = None,
+                                user_role: str = None, situation: str = None, characters: List[Dict] = None) -> bool:
+        """Update a roleplay scenario."""
+        import json
+        characters_json = json.dumps(characters) if characters else None
+        return self.db.update_roleplay_scenario(scenario_id, name, description, user_role, situation, characters_json)
+    
+    def delete_roleplay_scenario(self, scenario_id: int) -> bool:
+        """Delete a roleplay scenario."""
+        return self.db.delete_roleplay_scenario(scenario_id)
 
     def send_chat_message(self, session_id: int, user_message: str, current_history: List[Dict]) -> Tuple[bool, Dict, Dict]:
         """Send a message to the AI and process the response."""
@@ -1449,15 +1489,40 @@ Any important exceptions or nuances.
         
         # 2. Build Prompt
         session = next((s for s in self.get_chat_sessions() if s['id'] == session_id), None)
-        topic = session['cur_topic'] if session else "General Conversation"
+        if not session:
+            return False, {"error": "Session not found"}, {}
         
-        prompt_template = self._get_effective_prompt('chat', 'system_roleplay')
-        system_prompt = prompt_template.format(
-            persona="Language Tutor",
-            study_language=self.study_language,
-            native_language=self.native_language,
-            topic=topic
-        )
+        topic = session['cur_topic'] if session else "General Conversation"
+        mode = session.get('mode', 'topical')
+        
+        # Build system prompt based on mode
+        if mode == 'roleplay' and session.get('scenario_id'):
+            scenario = self.get_roleplay_scenario(session['scenario_id'])
+            if not scenario:
+                return False, {"error": "Roleplay scenario not found"}, {}
+            
+            # Build character descriptions
+            characters_desc = ""
+            for char in scenario['characters']:
+                characters_desc += f"- {char['name']} ({char['role']}): {char.get('personality', 'No description')}\n"
+            
+            prompt_template = self._get_effective_prompt('roleplay', 'system_roleplay_scenario')
+            system_prompt = prompt_template.format(
+                situation=scenario['situation'],
+                user_role=scenario['user_role'],
+                characters_description=characters_desc,
+                study_language=self.study_language,
+                native_language=self.native_language
+            )
+        else:
+            # Topical mode
+            prompt_template = self._get_effective_prompt('chat', 'system_roleplay')
+            system_prompt = prompt_template.format(
+                persona="Language Tutor",
+                study_language=self.study_language,
+                native_language=self.native_language,
+                topic=topic
+            )
         
         # Construct full prompt with history
         full_prompt = f"System: {system_prompt}\n\n Conversation History:\n"
@@ -1476,7 +1541,7 @@ Any important exceptions or nuances.
             
             if content:
                 # 4. Parse Response (XML)
-                parsed_data, suggestions = self._parse_chat_response(content)
+                parsed_data, suggestions = self._parse_chat_response(content, mode)
                 
                 # 5. Save Assistant Message
                 import json
@@ -1496,8 +1561,8 @@ Any important exceptions or nuances.
             traceback.print_exc()
             return False, {"error": f"Error: {e}"}, {}
 
-    def _parse_chat_response(self, text: str) -> Tuple[Dict, Dict]:
-        """Parse structured chat response."""
+    def _parse_chat_response(self, text: str, mode: str = 'topical') -> Tuple[Dict, Dict]:
+        """Parse structured chat response. Handles both topical and roleplay modes."""
         
         # Helpers to extract tag content
         def extract_tag(tag, source):
@@ -1505,14 +1570,24 @@ Any important exceptions or nuances.
             match = re.search(pattern, source, re.DOTALL | re.IGNORECASE)
             return match.group(1).strip() if match else ""
         
-        reply = extract_tag('reply', text)
+        # Extract feedback, vocab, grammar sections (same for both modes)
         feedback = extract_tag('feedback', text)
         vocab_section = extract_tag('vocab', text)
         grammar_section = extract_tag('grammar', text)
         
-        # Fallback if XML fails (LLM forgot format)
-        if not reply:
-            reply = text # Assume whole text is reply
+        # Extract reply based on mode
+        if mode == 'roleplay':
+            # For roleplay, parse multi-character dialogue
+            reply = self._parse_character_dialogue(text)
+            if not reply:
+                # Fallback: extract <characters> tag content
+                characters_section = extract_tag('characters', text)
+                reply = characters_section if characters_section else text
+        else:
+            # For topical, extract simple <reply> tag
+            reply = extract_tag('reply', text)
+            if not reply:
+                reply = text  # Fallback: assume whole text is reply
         
         # Extract structured items from vocab/grammar sections
         parsed_suggestions = {
@@ -1533,5 +1608,21 @@ Any important exceptions or nuances.
             'reply': reply,
             'feedback': feedback,
             'vocab_section': vocab_section,
-            'grammar_section': grammar_section
+            'grammar_section': grammar_section,
+            'mode': mode
         }, parsed_suggestions
+    
+    def _parse_character_dialogue(self, text: str) -> str:
+        """Parse multi-character dialogue from roleplay responses."""
+        # Extract all <character> tags and format them
+        pattern = r'<character\s+name="([^"]+)"\s+role="([^"]+)">(.+?)</character>'
+        matches = re.finditer(pattern, text, re.DOTALL | re.IGNORECASE)
+        
+        dialogue = ""
+        for match in matches:
+            name = match.group(1)
+            role = match.group(2)
+            content = match.group(3).strip()
+            dialogue += f"**{name}** ({role}): {content}\n"
+        
+        return dialogue if dialogue else ""

@@ -30,7 +30,7 @@ chrome.runtime.onInstalled.addListener(() => {
 // Handle context menu clicks
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   const selectedText = info.selectionText.trim();
-  console.log('[BG] Context menu:', info.menuItemId, 'Text:', selectedText);
+  console.log('[BG] Context menu:', info.menuItemId, 'Text length:', selectedText.length);
   
   if (!selectedText) return;
 
@@ -70,7 +70,7 @@ function importContent(text, type, tab) {
         // Notify user in content script
         chrome.tabs.sendMessage(tab.id, {
           action: 'showNotification',
-          message: `✓ Added ${type}: "${text.substring(0, 40)}..."`,
+          message: `✓ Added ${type} successfully`,
           error: false
         }).catch(() => {
           // Content script might not be loaded, that's OK
@@ -111,7 +111,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           url: content.url,
           title: content.title || ''
         };
-        console.log('[BG] Sending payload to API:', payload);
+        console.log('[BG] Sending payload to API: type=' + payload.content_type + ', length=' + payload.content.length);
         
         // Send to API
         return fetch(`${API_URL}/imported`, {

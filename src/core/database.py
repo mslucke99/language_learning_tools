@@ -175,14 +175,32 @@ class FlashcardDatabase:
             # Column already exists
             pass
         
+        # Create roleplay_scenarios table for custom role-play scenarios
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS roleplay_scenarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                user_role TEXT NOT NULL,
+                situation TEXT NOT NULL,
+                characters TEXT NOT NULL,  -- JSON array of character definitions
+                created_at TEXT NOT NULL,
+                last_updated TEXT NOT NULL
+            )
+        """)
+        
         # Create chat_sessions table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS chat_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 cur_topic TEXT,
                 study_language TEXT,
+                mode TEXT DEFAULT 'topical',  -- 'topical' or 'roleplay'
+                scenario_id INTEGER,  -- FK to roleplay_scenarios
+                character_context TEXT,  -- JSON with active character info for multi-character support
                 created_at TEXT NOT NULL,
-                last_updated TEXT NOT NULL
+                last_updated TEXT NOT NULL,
+                FOREIGN KEY (scenario_id) REFERENCES roleplay_scenarios (id) ON DELETE SET NULL
             )
         """)
 
@@ -198,6 +216,22 @@ class FlashcardDatabase:
                 FOREIGN KEY (session_id) REFERENCES chat_sessions (id) ON DELETE CASCADE
             )
         """)
+        
+        # Migrations for existing chat_sessions table
+        try:
+            cursor.execute("ALTER TABLE chat_sessions ADD COLUMN mode TEXT DEFAULT 'topical'")
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cursor.execute("ALTER TABLE chat_sessions ADD COLUMN scenario_id INTEGER")
+        except sqlite3.OperationalError:
+            pass
+        
+        try:
+            cursor.execute("ALTER TABLE chat_sessions ADD COLUMN character_context TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         # Create quiz_sessions table
         cursor.execute("""
@@ -673,7 +707,8 @@ class FlashcardDatabase:
             print(f'[DB] Returned row ID: {row_id}', flush=True)
             return row_id
         except Exception as e:
-            print(f'[DB] ERROR in add_imported_content: {str(e)}', flush=True)
+            err_msg = str(e).encode('ascii', 'backslashreplace').decode('ascii')
+            print(f'[DB] ERROR in add_imported_content: {err_msg}', flush=True)
             import traceback
             traceback.print_exc()
             raise
@@ -990,9 +1025,24 @@ class FlashcardDatabase:
         cursor = self.conn.cursor()
         now = datetime.now().isoformat()
         cursor.execute("""
-            INSERT INTO chat_sessions (cur_topic, study_language, created_at, last_updated)
-            VALUES (?, ?, ?, ?)
-        """, (topic, study_language, now, now))
+            INSERT INTO chat_sessions (cur_topic, study_language, mode, scenario_id, character_context, created_at, last_updated)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (topic, study_language, 'topical', None, None, now, now))
+        self.conn.commit()
+        return cursor.lastrowid
+    
+    def create_roleplay_chat_session(self, scenario_id: int, study_language: str, character_context: Optional[str] = None) -> int:
+        """Create a new roleplay chat session."""
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+        scenario = self.get_roleplay_scenario(scenario_id)
+        if not scenario:
+            raise ValueError(f"Scenario {scenario_id} not found")
+        
+        cursor.execute("""
+            INSERT INTO chat_sessions (cur_topic, study_language, mode, scenario_id, character_context, created_at, last_updated)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (scenario['situation'], study_language, 'roleplay', scenario_id, character_context, now, now))
         self.conn.commit()
         return cursor.lastrowid
 
@@ -1032,6 +1082,80 @@ class FlashcardDatabase:
         """Delete a chat session."""
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    # ===== ROLEPLAY SCENARIO METHODS =====
+    
+    def create_roleplay_scenario(self, name: str, description: str, user_role: str, situation: str, characters: str) -> int:
+        """Create a new roleplay scenario. characters should be JSON string."""
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+        cursor.execute("""
+            INSERT INTO roleplay_scenarios (name, description, user_role, situation, characters, created_at, last_updated)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (name, description, user_role, situation, characters, now, now))
+        self.conn.commit()
+        return cursor.lastrowid
+    
+    def get_roleplay_scenarios(self) -> List[Dict]:
+        """Get all roleplay scenarios."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM roleplay_scenarios ORDER BY last_updated DESC")
+        cols = [desc[0] for desc in cursor.description]
+        return [dict(zip(cols, row)) for row in cursor.fetchall()]
+    
+    def get_roleplay_scenario(self, scenario_id: int) -> Optional[Dict]:
+        """Get a specific roleplay scenario by ID."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM roleplay_scenarios WHERE id = ?", (scenario_id,))
+        row = cursor.fetchone()
+        if row:
+            cols = [desc[0] for desc in cursor.description]
+            return dict(zip(cols, row))
+        return None
+    
+    def update_roleplay_scenario(self, scenario_id: int, name: str = None, description: str = None, 
+                                 user_role: str = None, situation: str = None, characters: str = None) -> bool:
+        """Update a roleplay scenario."""
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+        
+        updates = []
+        params = []
+        
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description)
+        if user_role is not None:
+            updates.append("user_role = ?")
+            params.append(user_role)
+        if situation is not None:
+            updates.append("situation = ?")
+            params.append(situation)
+        if characters is not None:
+            updates.append("characters = ?")
+            params.append(characters)
+        
+        if not updates:
+            return False
+        
+        updates.append("last_updated = ?")
+        params.append(now)
+        params.append(scenario_id)
+        
+        query = f"UPDATE roleplay_scenarios SET {', '.join(updates)} WHERE id = ?"
+        cursor.execute(query, params)
+        self.conn.commit()
+        return cursor.rowcount > 0
+    
+    def delete_roleplay_scenario(self, scenario_id: int) -> bool:
+        """Delete a roleplay scenario."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM roleplay_scenarios WHERE id = ?", (scenario_id,))
         self.conn.commit()
         return cursor.rowcount > 0
 
