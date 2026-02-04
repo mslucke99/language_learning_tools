@@ -138,7 +138,8 @@ class FlashcardDatabase:
                 language TEXT,
                 tags TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT
+                updated_at TEXT,
+                proficiency INTEGER DEFAULT 0
             )
         """)
         # Create collections table
@@ -357,6 +358,13 @@ class FlashcardDatabase:
             if column not in columns:
                 print(f"[DB] Migrating table {table}: adding {column}")
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+
+        # 3. Grammar Proficiency migration
+        cursor.execute("PRAGMA table_info(grammar_book_entries)")
+        columns = [info[1] for info in cursor.fetchall()]
+        if "proficiency" not in columns:
+            print("[DB] Migrating grammar_book_entries: adding proficiency")
+            cursor.execute("ALTER TABLE grammar_book_entries ADD COLUMN proficiency INTEGER DEFAULT 0")
 
         # 3. User notes migrations for mobile annotation support
         migrations_user_notes = [
@@ -884,14 +892,14 @@ class FlashcardDatabase:
 
     # ===== GRAMMAR BOOK METHODS =====
 
-    def add_grammar_entry(self, title: str, content: str, language: str = "", tags: str = "") -> int:
+    def add_grammar_entry(self, title: str, content: str, language: str = "", tags: str = "", proficiency: int = 0) -> int:
         """Add a new entry to the grammar book."""
         cursor = self.conn.cursor()
         cursor.execute("""
             INSERT INTO grammar_book_entries 
-            (title, content, language, tags, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (title, content, language, tags, datetime.now().isoformat(), datetime.now().isoformat()))
+            (title, content, language, tags, created_at, updated_at, proficiency)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (title, content, language, tags, datetime.now().isoformat(), datetime.now().isoformat(), proficiency))
         self.conn.commit()
         return cursor.lastrowid
 
@@ -900,7 +908,7 @@ class FlashcardDatabase:
         cursor = self.conn.cursor()
         if search_query:
             query = """
-                SELECT id, title, content, language, tags, created_at, updated_at, collection_id
+                SELECT id, title, content, language, tags, created_at, updated_at, collection_id, proficiency
                 FROM grammar_book_entries
                 WHERE title LIKE ? OR content LIKE ? OR tags LIKE ?
                 ORDER BY updated_at DESC
@@ -909,7 +917,7 @@ class FlashcardDatabase:
             cursor.execute(query, (search_pattern, search_pattern, search_pattern))
         else:
             cursor.execute("""
-                SELECT id, title, content, language, tags, created_at, updated_at, collection_id
+                SELECT id, title, content, language, tags, created_at, updated_at, collection_id, proficiency
                 FROM grammar_book_entries
                 ORDER BY updated_at DESC
             """)
@@ -924,7 +932,8 @@ class FlashcardDatabase:
                 "tags": row[4],
                 "created_at": row[5],
                 "updated_at": row[6],
-                "collection_id": row[7]
+                "collection_id": row[7],
+                "proficiency": row[8] if len(row) > 8 else 0
             })
         return entries
 
@@ -932,7 +941,7 @@ class FlashcardDatabase:
         """Get a specific grammar book entry."""
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT id, title, content, language, tags, created_at, updated_at, collection_id
+            SELECT id, title, content, language, tags, created_at, updated_at, collection_id, proficiency
             FROM grammar_book_entries
             WHERE id = ?
         """, (entry_id,))
@@ -946,18 +955,19 @@ class FlashcardDatabase:
                 "tags": row[4],
                 "created_at": row[5],
                 "updated_at": row[6],
-                "collection_id": row[7]
+                "collection_id": row[7],
+                "proficiency": row[8] if len(row) > 8 else 0
             }
         return None
 
-    def update_grammar_entry(self, entry_id: int, title: str, content: str, language: str, tags: str) -> bool:
+    def update_grammar_entry(self, entry_id: int, title: str, content: str, language: str, tags: str, proficiency: int = 0) -> bool:
         """Update an existing grammar book entry."""
         cursor = self.conn.cursor()
         cursor.execute("""
             UPDATE grammar_book_entries
-            SET title = ?, content = ?, language = ?, tags = ?, updated_at = ?
+            SET title = ?, content = ?, language = ?, tags = ?, updated_at = ?, proficiency = ?
             WHERE id = ?
-        """, (title, content, language, tags, datetime.now().isoformat(), entry_id))
+        """, (title, content, language, tags, datetime.now().isoformat(), proficiency, entry_id))
         self.conn.commit()
         return cursor.rowcount > 0
 

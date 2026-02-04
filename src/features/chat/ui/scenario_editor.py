@@ -56,12 +56,12 @@ class ScenarioEditorDialog(tk.Toplevel):
         # --- Description ---
         ttk.Label(scrollable_frame, text="Description:", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(10, 2))
         self.desc_text = scrolledtext.ScrolledText(scrollable_frame, height=3, wrap="word", font=("Segoe UI", 10))
-        self.desc_text.pack(anchor="ew", pady=(0, 10), fill="both", expand=False)
+        self.desc_text.pack(anchor="w", pady=(0, 10), fill="both", expand=False)
         
         # --- Situation ---
         ttk.Label(scrollable_frame, text="Situation/Context:", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(10, 2))
         self.situation_text = scrolledtext.ScrolledText(scrollable_frame, height=4, wrap="word", font=("Segoe UI", 10))
-        self.situation_text.pack(anchor="ew", pady=(0, 10), fill="both", expand=False)
+        self.situation_text.pack(anchor="w", pady=(0, 10), fill="both", expand=False)
         
         # --- User Role ---
         ttk.Label(scrollable_frame, text="Your Role:", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(10, 2))
@@ -135,7 +135,7 @@ class ScenarioEditorDialog(tk.Toplevel):
         # Personality/Description
         ttk.Label(dialog, text="Personality & Background:", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=10, pady=(10, 2))
         personality_text = scrolledtext.ScrolledText(dialog, height=5, wrap="word", font=("Segoe UI", 10))
-        personality_text.pack(anchor="ew", padx=10, pady=(0, 10), fill="both", expand=True)
+        personality_text.pack(anchor="w", padx=10, pady=(0, 10), fill="both", expand=True)
         if existing_char:
             personality_text.insert("1.0", existing_char.get('personality', ''))
         

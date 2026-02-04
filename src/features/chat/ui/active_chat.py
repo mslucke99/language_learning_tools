@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, scrolledtext
 import json
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.ui_utils import setup_standard_header
+from src.core.ui.related_items_panel import add_suggestion_to_storage
 
 class ActiveChatFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, session_id: int):
@@ -152,28 +153,28 @@ class ActiveChatFrame(ttk.Frame):
              self.grammar_tab.configure(state="disabled")
 
     def _add_suggestion(self, item, type_name):
+        """Add a suggestion using the shared utility."""
         try:
+            # Check for duplicates for word type
             if type_name == 'word':
-                # Check duplicate
-                existing = self.study_manager.db.find_flashcard_by_question(item['word'])
+                existing = self.study_manager.db.find_flashcard_by_question(item.get('word', ''))
                 if existing:
                     if not messagebox.askyesno("Duplicate", f"Word '{item['word']}' exists. Add anyway?"):
                         return
-
-                content_id = self.study_manager.db.add_imported_content(
-                    'word', item['word'], url="Chat Suggestion",
-                    title="Interactive Chat", language=self.study_manager.study_language
-                )
-                self.study_manager.add_word_definition(
-                    content_id, item['definition'], definition_language=self.study_manager.native_language
-                )
-                messagebox.showinfo("Saved", f"Added '{item['word']}'")
-                
-            elif type_name == 'grammar':
-                self.study_manager.db.add_grammar_entry(
-                    item['title'], item['explanation'], language=self.study_manager.study_language, tags="chat-generated"
-                )
-                messagebox.showinfo("Saved", f"Added '{item['title']}'")
+            
+            success = add_suggestion_to_storage(
+                self.study_manager.db,
+                self.study_manager,
+                item,
+                type_name,
+                source="Chat Suggestion"
+            )
+            
+            if success:
+                label = item.get('word', '') if type_name == 'word' else item.get('title', '')
+                messagebox.showinfo("Saved", f"Added '{label}'")
+            else:
+                messagebox.showerror("Error", "Failed to add item")
                 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to add: {e}")

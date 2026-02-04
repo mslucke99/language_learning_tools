@@ -3,7 +3,8 @@ from tkinter import ttk, messagebox, scrolledtext, simpledialog
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header, bind_mousewheel
-from src.features.study_center.ui.dialogs import ManageCollectionsDialog, MoveItemDialog, DeckPickerDialog
+from src.core.ui.related_items_panel import RelatedItemsPanel
+from src.features.study_center.ui.dialogs import ManageCollectionsDialog, MoveItemDialog
 
 class WordsViewFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, db: FlashcardDatabase, embedded=False):
@@ -141,12 +142,16 @@ class WordsViewFrame(ttk.Frame):
         self.word_notes_text.pack(fill="both", expand=True)
         ttk.Button(tab_notes, text="Save Changes", command=self._save_word_definition).pack(anchor="e", pady=5)
         
-        # TAB 3: Related Items
+        # TAB 3: Related Items - Using reusable component
         tab_related = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(tab_related, text="Related Items")
-        self.related_items_frame = ttk.Frame(tab_related)
-        self.related_items_frame.pack(fill="both", expand=True)
-        ttk.Label(self.related_items_frame, text="AI Suggestions will appear here...", font=("Arial", 10, "italic"), foreground="gray").pack(pady=20)
+        self.related_items_panel = RelatedItemsPanel(
+            tab_related, 
+            self.db, 
+            self.study_manager,
+            show_deck_choice=True
+        )
+        self.related_items_panel.pack(fill="both", expand=True)
         
         # Initial Population
         self.words_data = self.study_manager.get_imported_words()
@@ -317,9 +322,8 @@ class WordsViewFrame(ttk.Frame):
             # Handle suggestions
             suggestions = status.get('suggestions', {})
             if suggestions:
-                self._populate_suggestions(suggestions)
-                
-            messagebox.showinfo("Complete", "Generation complete!")
+                self.related_items_panel.populate(suggestions)
+                self.notebook.select(2)  # Switch to Related Items tab
 
     def _add_manual_word_dialog(self):
         # ... logic for adding manual word ...
@@ -371,63 +375,7 @@ class WordsViewFrame(ttk.Frame):
         self.words_data = self.study_manager.get_imported_words()
         self._update_words_view()
 
-    def _populate_suggestions(self, suggestions):
-        for widget in self.related_items_frame.winfo_children(): widget.destroy()
-        
-        # Check if empty
-        if not suggestions.get('flashcards') and not suggestions.get('grammar'):
-             ttk.Label(self.related_items_frame, text="No specific suggestions found.", font=("Arial", 9, "italic")).pack(pady=20)
-             return
-             
-        # Add Flashcards
-        flashcards = suggestions.get('flashcards', [])
-        if flashcards:
-            ttk.Label(self.related_items_frame, text="📚 Vocabulary Suggestions", font=("Arial", 10, "bold")).pack(anchor="w", pady=(10, 5))
-            for item in flashcards:
-                f = ttk.Frame(self.related_items_frame)
-                f.pack(fill="x", pady=2)
-                ttk.Label(f, text=f"• {item['word']}", font=("Arial", 10, "bold")).pack(side="left")
-                ttk.Label(f, text=f": {item['definition']}", font=("Arial", 9)).pack(side="left", padx=5)
-                ttk.Button(f, text="Add Card", width=8, command=lambda i=item: self._add_suggestion(i, 'word')).pack(side="right")
+    # _populate_suggestions and _add_suggestion moved to RelatedItemsPanel component
+    # Tab switch is handled in _handle_completed_task above
 
-        # Add Grammar
-        grammar = suggestions.get('grammar', [])
-        if grammar:
-            ttk.Label(self.related_items_frame, text="📖 Grammar Suggestions", font=("Arial", 10, "bold")).pack(anchor="w", pady=(20, 5))
-            for item in grammar:
-                f = ttk.Frame(self.related_items_frame)
-                f.pack(fill="x", pady=2)
-                ttk.Label(f, text=f"• {item['title']}", font=("Arial", 10, "bold")).pack(side="left")
-                ttk.Button(f, text="Add Note", width=8, command=lambda i=item: self._add_suggestion(i, 'grammar')).pack(side="right")
-                ttk.Label(f, text=f"- {item['explanation'][:60]}...", font=("Arial", 9, "italic")).pack(side="left", padx=5)
-        
-        # Switch to tab
-        self.notebook.select(2) # Tab index 2 is Related Items
 
-    def _add_suggestion(self, item, type_name):
-        try:
-            if type_name == 'word':
-                # Open Deck Picker
-                deck_id = DeckPickerDialog(self.winfo_toplevel(), self.db).show()
-                if not deck_id: return
-                
-                # Check duplicate
-                existing = self.db.find_flashcard_in_deck(deck_id, item['word'])
-                if existing:
-                    if not messagebox.askyesno("Duplicate", f"Card '{item['word']}' already in this deck. Add anyway?"):
-                        return
-                
-                self.db.add_flashcard(deck_id, item['word'], item['definition'])
-                messagebox.showinfo("Saved", f"Added flashcard to deck!")
-                
-            elif type_name == 'grammar':
-                self.db.add_grammar_entry(
-                    item['title'], 
-                    item['explanation'], 
-                    language=self.study_manager.study_language,
-                    tags="auto-generated"
-                )
-                messagebox.showinfo("Saved", f"Added grammar pattern '{item['title']}'.")
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to add item: {e}")

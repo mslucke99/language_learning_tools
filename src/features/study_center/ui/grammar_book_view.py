@@ -98,6 +98,15 @@ class GrammarBookViewFrame(ttk.Frame):
         self.grammar_tags_var = tk.StringVar()
         ttk.Entry(tags_frame, textvariable=self.grammar_tags_var).pack(fill="x", pady=(2, 0))
         
+        # Proficiency
+        prof_frame = ttk.Frame(right_panel)
+        prof_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(prof_frame, text="Mastery Status:").pack(side="left")
+        self.grammar_prof_var = tk.StringVar(value="0 - New")
+        prof_cb = ttk.Combobox(prof_frame, textvariable=self.grammar_prof_var, 
+                     values=["0 - New", "1 - Learning", "2 - Mastered"], state="readonly", width=15)
+        prof_cb.pack(side="left", padx=5)
+        
         if self.ai_available:
             ttk.Button(right_panel, text="✨ Generate Explanation from Title", command=self._generate_grammar_explanation).pack(anchor="w", pady=(0, 10))
             
@@ -158,7 +167,7 @@ class GrammarBookViewFrame(ttk.Frame):
             else:
                 if not uncategorized_node: uncategorized_node = self.grammar_tree.insert("", "end", text="📦 Uncategorized", open=True)
                 parent = uncategorized_node
-            self.grammar_tree.insert(parent, "end", iid=f"gram_{e['id']}", text=f"📒 {e['title']}")
+            self.grammar_tree.insert(parent, "end", iid=f"gram_{e['id']}", text=f"{self._get_prof_icon(e.get('proficiency',0))} {e['title']}")
 
     def _on_grammar_entry_selected(self, event):
         selection = self.grammar_tree.selection()
@@ -173,14 +182,23 @@ class GrammarBookViewFrame(ttk.Frame):
         self.current_grammar_id = entry['id']
         self.grammar_title_var.set(entry['title'])
         self.grammar_tags_var.set(entry['tags'] or "")
+        prof = entry.get('proficiency', 0)
+        prof_map = {0: "0 - New", 1: "1 - Learning", 2: "2 - Mastered"}
+        self.grammar_prof_var.set(prof_map.get(prof, "0 - New"))
         self.grammar_content_text.delete(1.0, tk.END)
         self.grammar_content_text.insert(tk.END, entry['content'])
         self.current_status_label.config(text=f"Last updated: {entry['updated_at']}")
+
+    def _get_prof_icon(self, proficiency):
+        if proficiency == 2: return "✅"
+        if proficiency == 1: return "🔨"
+        return "📒"
 
     def _new_grammar_entry(self):
         self.current_grammar_id = None
         self.grammar_title_var.set("")
         self.grammar_tags_var.set("")
+        self.grammar_prof_var.set("0 - New")
         self.grammar_content_text.delete(1.0, tk.END)
         self.grammar_tree.selection_remove(self.grammar_tree.selection())
         self.current_status_label.config(text="")
@@ -189,15 +207,17 @@ class GrammarBookViewFrame(ttk.Frame):
         title = self.grammar_title_var.get().strip()
         content = self.grammar_content_text.get(1.0, tk.END).strip()
         tags = self.grammar_tags_var.get().strip()
+        prof_str = self.grammar_prof_var.get()
+        proficiency = int(prof_str.split(" - ")[0])
         
         if not title:
             messagebox.showwarning("Warning", "Title is required")
             return
             
         if self.current_grammar_id:
-            self.study_manager.update_grammar_entry(self.current_grammar_id, title, content, tags)
+            self.study_manager.update_grammar_entry(self.current_grammar_id, title, content, tags, proficiency)
         else:
-            self.current_grammar_id = self.study_manager.add_grammar_entry(title, content, tags)
+            self.current_grammar_id = self.study_manager.add_grammar_entry(title, content, tags, proficiency)
         
         self._update_grammar_view()
         messagebox.showinfo("Success", "Entry saved!")

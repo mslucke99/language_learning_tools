@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 from src.core.database import FlashcardDatabase
 from src.services.llm_service import OllamaClient, OllamaThreadedQuery
-from src.services.prompts import WORD_PROMPTS, SENTENCE_PROMPTS, WRITING_PROMPTS, CHAT_PROMPTS
+from src.services.prompts import WORD_PROMPTS, SENTENCE_PROMPTS, WRITING_PROMPTS, CHAT_PROMPTS, PRACTICE_PROMPTS, ROLEPLAY_PROMPTS
 
 
 class StudyManager:
@@ -725,13 +725,15 @@ class StudyManager:
             'grammar': []
         }
         
-        # Extract Flashcards: <flashcard word="TERM">DEF</flashcard>
+        # Extract Flashcards: <flashcard word="TERM" context="CTX">DEF</flashcard>
         # Regex handles attributes with single or double quotes and optional spaces
-        fc_pattern = r'<flashcard\s+word\s*=\s*[\'"](.*?)[\'"]>(.*?)</flashcard>'
+        # Group 1: word, Group 2: optional context (inner capture), Group 3: definition
+        fc_pattern = r'<flashcard\s+word\s*=\s*[\'"](.*?)[\'"](?:\s+context\s*=\s*[\'"](.*?)[\'"])?>(.*?)</flashcard>'
         for match in re.finditer(fc_pattern, text, re.DOTALL | re.IGNORECASE):
             suggestions['flashcards'].append({
                 'word': match.group(1),
-                'definition': match.group(2).strip()
+                'context': match.group(2) if match.group(2) else "",
+                'definition': match.group(3).strip()
             })
             
         # Extract Grammar: <grammar_pattern title="TITLE">EXP</grammar_pattern>
@@ -1231,13 +1233,13 @@ Any important exceptions or nuances.
             
         return False, content, {}
 
-    def add_grammar_entry(self, title: str, content: str, tags: str = "") -> int:
+    def add_grammar_entry(self, title: str, content: str, tags: str = "", proficiency: int = 0) -> int:
         """Add a grammar book entry."""
-        return self.db.add_grammar_entry(title, content, self.study_language, tags)
+        return self.db.add_grammar_entry(title, content, self.study_language, tags, proficiency)
     
-    def update_grammar_entry(self, entry_id: int, title: str, content: str, tags: str) -> bool:
+    def update_grammar_entry(self, entry_id: int, title: str, content: str, tags: str, proficiency: int = 0) -> bool:
         """Update a grammar book entry."""
-        return self.db.update_grammar_entry(entry_id, title, content, self.study_language, tags)
+        return self.db.update_grammar_entry(entry_id, title, content, self.study_language, tags, proficiency)
     
     def delete_grammar_entry(self, entry_id: int) -> bool:
         """Delete a grammar book entry."""
@@ -1249,6 +1251,87 @@ Any important exceptions or nuances.
         # currently DB stores language column but get_grammar_entries doesn't filter by it strictly yet.
         # Ideally, we should filter by self.study_language if we want language separation.
         return self.db.get_grammar_entries(search_query)
+
+    def generate_grammar_practice_sentences(self, count: int = 3) -> Tuple[bool, str, List[Dict]]:
+        """
+        Generate practice sentences based on mastered grammar patterns.
+        """
+        if not self.ai_client or not self.ai_client.is_available():
+            return False, "AI service not available", []
+
+        # 1. Get mastered grammar
+        all_grammar = self.get_grammar_entries()
+        mastered = [g for g in all_grammar if g.get('proficiency', 0) >= 2]
+        
+        if not mastered:
+            return False, "No mastered grammar patterns found. Mark some as 'Mastered' first!", []
+            
+        # 2. Select random patterns (up to 3)
+        import random
+        k = min(len(mastered), 3)
+        selected = random.sample(mastered, k)
+        patterns_text = "\n".join([f"- {g['title']}: {g['tags']}" for g in selected])
+        
+        # 3. Build Prompt
+        prompt_template = self._get_effective_prompt('practice', 'grammar_practice')
+        prompt = prompt_template.format(
+            count=count,
+            study_language=self.study_language,
+            native_language=self.native_language,
+            patterns=patterns_text
+        )
+        
+        # 4. Generate
+        try:
+            response = self.ai_client.generate_response(prompt, timeout=self.request_timeout)
+            if not response: return False, "Empty response from AI", []
+            
+            # 5. Parse
+            import json
+            # Extract JSON if wrapped in markdown
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group(0))
+                sentences = data.get('sentences', [])
+                
+                added_count = 0
+                generated_items = []
+                for s in sentences:
+                    # Add to DB
+                    content_id = self.db.add_imported_content(
+                        content_type='sentence',
+                        content=s['sentence'],
+                        context=f"Grammar Practice: {', '.join(s.get('patterns_used', []))}",
+                        title="Grammar Practice",
+                        url="ai-generated",
+                        language=self.study_language,
+                        tags="grammar-practice"
+                    )
+                    
+                    self.db.add_sentence_explanation(
+                        imported_content_id=content_id,
+                        sentence=s['sentence'],
+                        explanation=f"Translation: {s.get('translation', '')}\nPatterns: {', '.join(s.get('patterns_used', []))}",
+                        explanation_language='native',
+                        focus_area='grammar',
+                        grammar_notes=f"Practice based on: {', '.join(s.get('patterns_used', []))}",
+                        user_notes="",
+                        created_at=datetime.now().isoformat(),
+                        last_updated=datetime.now().isoformat(),
+                        source='ai-practice',
+                        suggestions=None
+                    )
+
+                    added_count += 1
+                    generated_items.append(s)
+                
+                return True, f"Generated {added_count} sentences.", generated_items
+            else:
+                 return False, "Failed to parse AI response (JSON not found)", []
+                 
+        except Exception as e:
+            return False, f"Error: {e}", []
+
 
     # ========== MANUAL CONTENT ENTRY ==========
     
@@ -1626,3 +1709,20 @@ Any important exceptions or nuances.
             dialogue += f"**{name}** ({role}): {content}\n"
         
         return dialogue if dialogue else ""
+
+    def _get_effective_prompt(self, category: str, key: str) -> str:
+        """Get effective prompt template."""
+        if category == 'word':
+            template_key = 'native_template' if self.prefer_native_definitions else 'study_template'
+            return WORD_PROMPTS.get(key, {}).get(template_key, "")
+        elif category == 'sentence':
+            return SENTENCE_PROMPTS.get(key, {}).get('template', "")
+        elif category == 'chat':
+            return CHAT_PROMPTS.get(key, {}).get('template', "")
+        elif category == 'writing':
+            return WRITING_PROMPTS.get(key, {}).get('template', "")
+        elif category == 'roleplay':
+            return ROLEPLAY_PROMPTS.get(key, {}).get('template', "")
+        elif category == 'practice':
+            return PRACTICE_PROMPTS.get(key, {}).get('template', "")
+        return ""

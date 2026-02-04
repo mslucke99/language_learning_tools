@@ -78,7 +78,20 @@ class DashboardApp:
         self.show_home()
         
         # Start periodic updates
+        # Start periodic updates
         self._update_status_bar()
+        
+        # Bind Global Shortcuts
+        self.bind_global_shortcuts()
+        
+    def bind_global_shortcuts(self):
+        """Bind global navigation shortcuts."""
+        self.root.bind("<Control-D>", lambda e: self.show_flashcards_dashboard())
+        self.root.bind("<Control-S>", lambda e: self.show_study_center_dashboard())
+        self.root.bind("<Control-C>", lambda e: self.show_chat_dashboard())
+        self.root.bind("<Control-W>", lambda e: self.show_writing_lab_view())
+        self.root.bind("<Control-Q>", lambda e: self.show_quiz_setup())
+        # Use simple Ctrl+Letter for main navigation, Shift is often too complex for frequent use
         
     def _preload_ai_model(self):
         import threading
