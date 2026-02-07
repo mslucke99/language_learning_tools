@@ -83,3 +83,23 @@ build/
 # OS specific
 .DS_Store
 Thumbs.db
+
+# Generated native files
+**/GeneratedPluginRegistrant.swift
+**/generated_plugin_registrant.cc
+**/generated_plugins.cmake
+
+# Scratchpads/Testing
+verify_fix.py
+SOLUTION_SUMMARY.md
+test_out.txt
+**/debug_db.py
+flashcard_app/
+current_issues.txt
+future_improvements.txt
+prompts_review.md
+planned-features.txt
+*.swp
+*.swo
+*.tmp
+*.log
