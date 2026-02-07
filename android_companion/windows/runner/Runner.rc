@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.languagelearning" "\0"
-            VALUE "FileDescription", "android_companion" "\0"
+            VALUE "CompanyName", "com.getchafluentia" "\0"
+            VALUE "FileDescription", "Getcha Fluentia" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "android_companion" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.languagelearning. All rights reserved." "\0"
-            VALUE "OriginalFilename", "android_companion.exe" "\0"
-            VALUE "ProductName", "android_companion" "\0"
+            VALUE "InternalName", "getchafluentia" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.getchafluentia. All rights reserved." "\0"
+            VALUE "OriginalFilename", "getchafluentia.exe" "\0"
+            VALUE "ProductName", "Getcha Fluentia" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

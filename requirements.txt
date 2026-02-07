@@ -1,0 +1,20 @@
+# Language Learning Suite - Dependencies
+
+# Core
+flask>=2.0.0
+
+# AI / LLM
+requests>=2.25.0
+
+# Google Drive Sync
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.1.0
+google-api-python-client>=2.0.0
+keyring>=24.0.0
+
+# Testing
+pytest>=7.0.0
+dropbox>=11.0.0
+firebase-admin>=6.2.0
+google-auth-oauthlib>=6.2.0
