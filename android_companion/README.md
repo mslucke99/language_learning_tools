@@ -1,6 +1,6 @@
-# android_companion
+# Getcha Fluentia
 
-A new Flutter project.
+Getcha Fluentia - Your language learning companion.
 
 ## Getting Started
 

@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../services/database_helper.dart';
+import '../services/llm_service.dart';
+import '../services/prompts.dart';
+import 'package:uuid/uuid.dart';
 
 class ImportDetailScreen extends StatefulWidget {
   final int importId;
@@ -126,12 +130,65 @@ class _ImportDetailScreenState extends State<ImportDetailScreen> {
     }
   }
 
+  String _selectedText = '';
+
+  Future<void> _explainSelection() async {
+    if (_selectedText.isEmpty) return;
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final llmService = Provider.of<LLMService>(context, listen: false);
+      final prompt = Prompts.format(Prompts.sentencePrompts['all']!, {
+        'sentence': _selectedText,
+        'language': 'English', // TODO
+      });
+      final result = await llmService.generate(prompt);
+
+      if (mounted) Navigator.pop(context); // Close loading
+
+      if (result != null) {
+        // Save to DB
+        final expl = {
+          'imported_content_id': widget.importId,
+          'sentence': _selectedText,
+          'explanation': result,
+          'created_at': DateTime.now().toIso8601String(),
+          'uuid': const Uuid().v4(),
+        };
+        await _dbHelper.insertItem('sentence_explanations', expl);
+        await _loadRelatedItems();
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Import Detail'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          if (_selectedText.isNotEmpty)
+            TextButton.icon(
+              onPressed: _explainSelection,
+              icon: const Icon(Icons.auto_awesome, color: Colors.teal),
+              label: const Text(
+                "Explain",
+                style: TextStyle(color: Colors.teal),
+              ),
+            ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -141,7 +198,7 @@ class _ImportDetailScreenState extends State<ImportDetailScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Original Content',
+                    'Original Content (Select text to explain)',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -157,9 +214,16 @@ class _ImportDetailScreenState extends State<ImportDetailScreen> {
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: Colors.grey.shade300),
                     ),
-                    child: Text(
-                      widget.content,
-                      style: const TextStyle(fontSize: 16),
+                    child: SelectionArea(
+                      onSelectionChanged: (val) {
+                        setState(() {
+                          _selectedText = val?.plainText ?? '';
+                        });
+                      },
+                      child: Text(
+                        widget.content,
+                        style: const TextStyle(fontSize: 16),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 24),

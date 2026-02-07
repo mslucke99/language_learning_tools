@@ -134,7 +134,7 @@ class DeckPickerDialog:
         scroll.pack(side="right", fill="y")
         
         # Populate
-        decks = self.db.get_decks()
+        decks = self.db.get_all_decks()
         self.deck_map = {}
         for d in decks:
             display = f"{d['name']} ({d['total_cards']} cards)"

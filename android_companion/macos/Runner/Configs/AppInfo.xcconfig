@@ -5,10 +5,10 @@
 // 'flutter create' template.
 
 // The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = android_companion
+PRODUCT_NAME = GetchaFluentia
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.languagelearning.androidCompanion
+PRODUCT_BUNDLE_IDENTIFIER = com.getchafluentia.android
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.languagelearning. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 com.getchafluentia. All rights reserved.

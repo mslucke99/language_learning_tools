@@ -57,6 +57,24 @@ class StudyDashboardFrame(ttk.Frame):
         # Tab 7: Quiz
         quiz_tab = QuizUIFrame(self.notebook, self.controller, self.study_manager, self.db, embedded=True)
         self.notebook.add(quiz_tab, text=tr("tab_quiz", "📝 Quiz"))
+        
+        # Bind Tab Shortcuts (Ctrl+1 to Ctrl+6)
+        # Note: We bind to the parent because the frame itself might not have focus
+        # But to avoid conflict, we should bind only when this frame is visible/active.
+        # Ideally, bind to self.notebook or self.
+        
+        # Actually, global binding checking for visibility is safer for Tkinter
+        # but let's try binding to the notebook which should receive events when active
+        for i in range(1, 7):
+            self.controller.root.bind(f"<Control-Key-{i}>", self._make_tab_switcher(i-1), add="+")
+
+    def _make_tab_switcher(self, index):
+        """Factory for tab switch callbacks to capture index."""
+        def _switch(event):
+            # Only switch if this dashboard is actually visible
+            if self.winfo_viewable() and index < self.notebook.index("end"):
+                 self.notebook.select(index)
+        return _switch
 
     def _setup_stats_tab(self, parent):
         stats = self.study_manager.get_study_statistics()

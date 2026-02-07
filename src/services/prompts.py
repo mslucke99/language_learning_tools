@@ -47,7 +47,7 @@ WORD_PROMPTS = {
             'Highlight the word in **bold**.\n\n'
             '**Suggestions**: If any other words in these examples are likely to be difficult for a learner, '
             'append a flashcard suggestion at the very end of your response for 1-2 of them in this format: '
-            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n\n'
+            '<flashcard word="TERM" context="SENTENCE_WHERE_TERM_APPEARS">BRIEF_DEFINITION</flashcard>\n\n'
             '**Example 1 (with suggestions):**\n'
             '1. The **ephemeral** beauty of cherry blossoms captivates visitors.\n'
             '2. Is this feeling **ephemeral** or lasting?\n'
@@ -65,7 +65,7 @@ WORD_PROMPTS = {
             'unless specified otherwise. Highlight the word in **bold**.\n\n'
             '**Suggestions**: If any other words in these examples are difficult, '
             'append a flashcard suggestion at the very end in this format: '
-            '<flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n\n'
+            '<flashcard word="TERM" context="SENTENCE_WHERE_TERM_APPEARS">BRIEF_DEFINITION</flashcard>\n\n'
             '**Example 1 (with suggestion):**\n'
             '1. **사과**를 먹어요. (I eat an apple.)\n'
             '2. 이 **사과**는 빨개요. (This apple is red.)\n'
@@ -147,7 +147,7 @@ SENTENCE_PROMPTS = {
             '4. **Usage Tip**: A practical tip on how to use these patterns elsewhere.\n\n'
             '**Suggestions**: \n'
             '- If there is a distinct grammar pattern, append: <grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>\n'
-            '- If there is a difficult word worth studying separately, append: <flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n\n'
+            '- If there is a difficult word worth studying separately, append: <flashcard word="TERM" context="SENTENCE_WHERE_TERM_APPEARS">BRIEF_DEFINITION</flashcard>\n\n'
             '- Try to have at least 2 suggestions given if there are sufficient challenging points in the sentence.\n\n'
             '**Example Output:**\n'
             '**Translation**: "I want to go to the library."\n'
@@ -156,6 +156,29 @@ SENTENCE_PROMPTS = {
             '**Usage Tip**: Replace 가다 with any verb to express "want to [verb]".\n\n'
             '<grammar_pattern title="-고 싶다 Desire Pattern">Attach to verb stems: 먹고 싶다 (want to eat), 자고 싶다 (want to sleep)</grammar_pattern>\n'
             '<flashcard word="도서관">Library</flashcard>'
+        ),
+    }
+}
+
+# Practice generation prompts
+PRACTICE_PROMPTS = {
+    'grammar_practice': {
+        'name': 'Grammar Practice Generation',
+        'template': (
+            'Create {count} distinct practice sentences in {study_language}. '
+            'Each sentence must use AT LEAST one of the following grammar patterns:\n'
+            '{patterns}\n\n'
+            'Provide the output in JSON format:\n'
+            '{{\n'
+            '  "sentences": [\n'
+            '    {{\n'
+            '      "sentence": "The sentence in {study_language}",\n'
+            '      "translation": "The natural translation in {native_language}",\n'
+            '      "patterns_used": ["Name of pattern used"]\n'
+            '    }}\n'
+            '  ]\n'
+            '}}\n'
+            'Ensure the sentences are natural and appropriate for a learner who has mastered these patterns.'
         ),
     }
 }
@@ -181,7 +204,7 @@ WRITING_PROMPTS = {
             '4. **Natural Phrasing**: How would a native speaker say this more naturally?\n\n'
             '**Suggestions**: \n'
             '- If the user could benefit from learning a specific new word used in your feedback or relevant to the topic, '
-            'append: <flashcard word="TERM">BRIEF_DEFINITION</flashcard>\n'
+            'append: <flashcard word="TERM" context="SENTENCE_WHERE_TERM_APPEARS">BRIEF_DEFINITION</flashcard>\n'
             '- If there is a grammar pattern they should learn or that they misused, '
             'append: <grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>\n\n'
             '**Example Output:**\n'
@@ -214,7 +237,7 @@ CHAT_PROMPTS = {
             '</feedback>\n'
             '<vocab>\n'
             '  (List new words from YOUR reply or the user\'s message that are worth studying. '
-            'Format: <flashcard word="TERM">DEFINITION</flashcard>)\n'
+            'Format: <flashcard word="TERM" context="SENTENCE_WHERE_TERM_APPEARS">DEFINITION</flashcard>)\n'
             '</vocab>\n'
             '<grammar>\n'
             '  (Explain any key grammar patterns used in the conversation. '
@@ -258,6 +281,58 @@ EXAM_PROMPTS = {
             '  "explanation": "Briefly explain why this is the correct answer in {native_language}"\n'
             '}}\n\n'
             '**Context**: Target language is {study_language}. Focus on {focus_area}.'
+        ),
+    }
+}
+# Roleplay scenario prompts
+ROLEPLAY_PROMPTS = {
+    'system_roleplay_scenario': {
+        'name': 'Roleplay Scenario',
+        'template': (
+            'You are engaged in a language learning roleplay scenario in {study_language}.\n\n'
+            '**SCENARIO CONTEXT:**\n'
+            'Situation: {situation}\n'
+            'Your role: {user_role}\n\n'
+            '**ACTIVE CHARACTERS:**\n'
+            '{characters_description}\n\n'
+            'You are currently playing these characters. As you respond, naturally select which character(s) should speak based on '
+            'the conversation flow. You may have multiple characters speak in a single response if appropriate.\n\n'
+            '**OUTPUT FORMAT:**\n'
+            'Strictly follow this XML output format:\n\n'
+            '<characters>\n'
+            '  <character name="CHARACTER_NAME" role="CHARACTER_ROLE">\n'
+            '    Character dialogue in {study_language}\n'
+            '  </character>\n'
+            '  <!-- Add more character tags as needed -->\n'
+            '</characters>\n'
+            '<feedback>\n'
+            '  Corrections and feedback on the user\'s *last* message in {native_language}. Be encouraging but precise.\n'
+            '</feedback>\n'
+            '<vocab>\n'
+            '  List new or important words worth studying. Format: <flashcard word="TERM" context="SENTENCE_WHERE_TERM_APPEARS">DEFINITION</flashcard>\n'
+            '</vocab>\n'
+            '<grammar>\n'
+            '  Explain key grammar patterns used. Format: <grammar_pattern title="PATTERN">EXPLANATION</grammar_pattern>\n'
+            '</grammar>\n\n'
+            '**EXAMPLE RESPONSE:**\n'
+            '<characters>\n'
+            '  <character name="Alice" role="Café Clerk">\n'
+            '    어서오세요! 뭘 도와드릴까요?\n'
+            '  </character>\n'
+            '</characters>\n'
+            '<feedback>\n'
+            'Your greeting was natural! You could also say "음료수 주문하시겠어요?" to ask what drink they want.\n'
+            '</feedback>\n'
+            '<vocab>\n'
+            '<flashcard word="어서오세요">Welcome (polite greeting)</flashcard>\n'
+            '</vocab>\n'
+            '<grammar>\n'
+            '<grammar_pattern title="-ㄹ까요 Pattern">Used to make polite suggestions or ask if someone wants something</grammar_pattern>\n'
+            '</grammar>\n\n'
+            'User Native Language: {native_language}\n'
+            'Target Language: {study_language}\n'
+            'Maintain consistent character personalities and remember the conversation history for consistency.\n'
+            'Begin the roleplay or continue naturally.'
         ),
     }
 }

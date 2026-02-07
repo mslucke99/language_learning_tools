@@ -7,7 +7,7 @@ Detects conflicts and provides resolution strategies.
 
 import sqlite3
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional, Literal
+from typing import Dict, List, Tuple, Optional, Literal, Union
 from dataclasses import dataclass
 from enum import Enum
 
@@ -36,24 +36,27 @@ SYNCABLE_TABLES = [
 ]
 
 class SyncMerger:
-    def __init__(self, local_db_path: str, remote_db_path: str, last_sync_time: Optional[str] = None):
+    def __init__(self, local_db_path: str, remote_db_path: Optional[str] = None, last_sync_time: Optional[str] = None):
         print(f"[SyncMerger] __init__ called with:")
-        print(f"  local_db_path: {local_db_path!r} (type: {type(local_db_path)})")
-        print(f"  remote_db_path: {remote_db_path!r} (type: {type(remote_db_path)})")
-        print(f"  last_sync_time: {last_sync_time!r} (type: {type(last_sync_time)})")
+        print(f"  local_db_path: {local_db_path!r}")
+        print(f"  remote_db_path: {remote_db_path!r}")
         
-        # Validate last_sync_time is not a function/callable (common mistake)
+        # Validate last_sync_time is not a function/callable
         if callable(last_sync_time):
             raise TypeError(
                 f"last_sync_time must be a string (ISO timestamp) or None, "
-                f"but got a callable: {last_sync_time!r}. "
-                f"Did you forget to call the method?"
+                f"but got a callable: {last_sync_time!r}."
             )
         
         self.local_conn = sqlite3.connect(local_db_path)
         self.local_conn.row_factory = sqlite3.Row
-        self.remote_conn = sqlite3.connect(remote_db_path)
-        self.remote_conn.row_factory = sqlite3.Row
+        
+        if remote_db_path:
+            self.remote_conn = sqlite3.connect(remote_db_path)
+            self.remote_conn.row_factory = sqlite3.Row
+        else:
+            self.remote_conn = None
+
         self.last_sync_time = last_sync_time or "1970-01-01T00:00:00"
         
         # Session preferences
@@ -259,15 +262,98 @@ class SyncMerger:
                 results[table] = (0, 0, 0, 0)
         return results
 
-    def perform_merge(self) -> Dict[str, int]:
-        """Convenience method to merge all and aggregate stats."""
-        all_results = self.merge_all()
-        aggregated = {"added": 0, "updated": 0, "conflicts_resolved": 0, "soft_deleted": 0}
+    
+    def get_modified_rows_since(self, table: str, since_timestamp: str) -> List[Dict]:
+        """Get all rows modified after a timestamp."""
+        local_rows = self._get_all_rows(self.local_conn, table)
+        modified_rows = []
+        for uuid, row in local_rows.items():
+            if self._is_modified_since_sync(row.get('last_modified')) and \
+               row.get('last_modified') > since_timestamp:
+                modified_rows.append(dict(row))
+        return modified_rows
+
+    def merge_from_data(self, table: str, remote_data: List[Dict]) -> Tuple[int, int, int, int]:
+        """
+        Merge specific data (list of dicts) into local table.
+        Reuses conflict logic from merge_table.
+        """
+        local_rows = self._get_all_rows(self.local_conn, table)
+        local_deleted = self._get_deleted_uuids(self.local_conn, table)
         
-        for added, updated, conflicts, soft_deleted in all_results.values():
-            aggregated["added"] += added
-            aggregated["updated"] += updated
-            aggregated["conflicts_resolved"] += conflicts
-            aggregated["soft_deleted"] += soft_deleted
+        # Convert remote_data to dict keyed by UUID for easier lookup
+        remote_rows_map = {row['uuid']: row for row in remote_data if 'uuid' in row}
+        
+        added = 0
+        updated = 0
+        conflicts = 0
+        soft_deleted = 0
+        
+        local_cursor = self.local_conn.cursor()
+        
+        for uuid, remote_row in remote_rows_map.items():
+            # Skip if deleted locally
+            if uuid in local_deleted:
+                continue
             
-        return aggregated
+            local_row = local_rows.get(uuid)
+            
+            if local_row is None:
+                # New item from remote
+                self._insert_row(local_cursor, table, remote_row)
+                added += 1
+            else:
+                # Both exist - check for conflict
+                local_modified = self._is_modified_since_sync(local_row.get('last_modified'))
+                # For this merging logic, we assume remote data IS strictly newer or we wouldn't have fetched it if using the sync manager.
+                # BUT, technically we should adhere to timestamp comparison.
+                remote_modified = self._is_modified_since_sync(remote_row.get('last_modified'))
+                
+                # Check timestamps directly
+                if local_row.get('last_modified') > self.last_sync_time and remote_row.get('last_modified') > self.last_sync_time:
+                     # CONFLICT!
+                    conflicts += 1
+                    
+                    # Special case: Flashcard SRS - auto-resolve
+                    if table == "flashcards":
+                        winner = self._resolve_srs_conflict(local_row, remote_row)
+                        if winner == remote_row:
+                            self._update_row(local_cursor, table, remote_row)
+                            updated += 1
+                        continue
+                    
+                    # Same conflict resolution logic as merge_table...
+                    # For simplicity, if conflict preference is set to always one side, we respect that.
+                    # Otherwise, we might default to always keep local or throw error.
+                    # In this specialized method, let's assume if it wasn't auto-resolved by logic below, we might just Skip or Keep Local.
+                    # IMPORTANT: Real conflict resolution with UI callback needs to be supported here too.
+                    
+                    # Re-use logic? Ideally we'd extract the "resolve_conflict" part.
+                    # For now, let's "Keep Local" on unhandled conflict to avoid overwriting user data.
+                    # Or implement the callback:
+                    if self.on_conflict:
+                       conflict = ConflictInfo(
+                            table=table,
+                            uuid=uuid,
+                            local_modified=local_row.get('last_modified', ''),
+                            remote_modified=remote_row.get('last_modified', ''),
+                            local_data=local_row,
+                            remote_data=remote_row,
+                            description=self._get_item_description(table, local_row)
+                        )
+                       resolution = self.on_conflict(conflict)
+                       if resolution == ConflictResolution.ALWAYS_REMOTE or resolution == ConflictResolution.KEEP_REMOTE:
+                           self._update_row(local_cursor, table, remote_row)
+                           updated += 1
+                       # Otherwise keep local
+                    
+                    pass 
+
+                elif remote_row.get('last_modified') > local_row.get('last_modified'):
+                    # Remote is newer, and local hasn't changed since last sync (or remote handles conflict by being newer)
+                    # Actually, if we just check timestamps:
+                   self._update_row(local_cursor, table, remote_row)
+                   updated += 1
+        
+        self.local_conn.commit()
+        return added, updated, conflicts, soft_deleted

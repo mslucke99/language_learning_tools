@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 from src.core.database import FlashcardDatabase
 from src.services.llm_service import OllamaClient, OllamaThreadedQuery
-from src.services.prompts import WORD_PROMPTS, SENTENCE_PROMPTS, WRITING_PROMPTS, CHAT_PROMPTS
+from src.services.prompts import WORD_PROMPTS, SENTENCE_PROMPTS, WRITING_PROMPTS, CHAT_PROMPTS, PRACTICE_PROMPTS, ROLEPLAY_PROMPTS
 
 
 class StudyManager:
@@ -725,13 +725,15 @@ class StudyManager:
             'grammar': []
         }
         
-        # Extract Flashcards: <flashcard word="TERM">DEF</flashcard>
+        # Extract Flashcards: <flashcard word="TERM" context="CTX">DEF</flashcard>
         # Regex handles attributes with single or double quotes and optional spaces
-        fc_pattern = r'<flashcard\s+word\s*=\s*[\'"](.*?)[\'"]>(.*?)</flashcard>'
+        # Group 1: word, Group 2: optional context (inner capture), Group 3: definition
+        fc_pattern = r'<flashcard\s+word\s*=\s*[\'"](.*?)[\'"](?:\s+context\s*=\s*[\'"](.*?)[\'"])?>(.*?)</flashcard>'
         for match in re.finditer(fc_pattern, text, re.DOTALL | re.IGNORECASE):
             suggestions['flashcards'].append({
                 'word': match.group(1),
-                'definition': match.group(2).strip()
+                'context': match.group(2) if match.group(2) else "",
+                'definition': match.group(3).strip()
             })
             
         # Extract Grammar: <grammar_pattern title="TITLE">EXP</grammar_pattern>
@@ -1231,13 +1233,13 @@ Any important exceptions or nuances.
             
         return False, content, {}
 
-    def add_grammar_entry(self, title: str, content: str, tags: str = "") -> int:
+    def add_grammar_entry(self, title: str, content: str, tags: str = "", proficiency: int = 0) -> int:
         """Add a grammar book entry."""
-        return self.db.add_grammar_entry(title, content, self.study_language, tags)
+        return self.db.add_grammar_entry(title, content, self.study_language, tags, proficiency)
     
-    def update_grammar_entry(self, entry_id: int, title: str, content: str, tags: str) -> bool:
+    def update_grammar_entry(self, entry_id: int, title: str, content: str, tags: str, proficiency: int = 0) -> bool:
         """Update a grammar book entry."""
-        return self.db.update_grammar_entry(entry_id, title, content, self.study_language, tags)
+        return self.db.update_grammar_entry(entry_id, title, content, self.study_language, tags, proficiency)
     
     def delete_grammar_entry(self, entry_id: int) -> bool:
         """Delete a grammar book entry."""
@@ -1249,6 +1251,87 @@ Any important exceptions or nuances.
         # currently DB stores language column but get_grammar_entries doesn't filter by it strictly yet.
         # Ideally, we should filter by self.study_language if we want language separation.
         return self.db.get_grammar_entries(search_query)
+
+    def generate_grammar_practice_sentences(self, count: int = 3) -> Tuple[bool, str, List[Dict]]:
+        """
+        Generate practice sentences based on mastered grammar patterns.
+        """
+        if not self.ai_client or not self.ai_client.is_available():
+            return False, "AI service not available", []
+
+        # 1. Get mastered grammar
+        all_grammar = self.get_grammar_entries()
+        mastered = [g for g in all_grammar if g.get('proficiency', 0) >= 2]
+        
+        if not mastered:
+            return False, "No mastered grammar patterns found. Mark some as 'Mastered' first!", []
+            
+        # 2. Select random patterns (up to 3)
+        import random
+        k = min(len(mastered), 3)
+        selected = random.sample(mastered, k)
+        patterns_text = "\n".join([f"- {g['title']}: {g['tags']}" for g in selected])
+        
+        # 3. Build Prompt
+        prompt_template = self._get_effective_prompt('practice', 'grammar_practice')
+        prompt = prompt_template.format(
+            count=count,
+            study_language=self.study_language,
+            native_language=self.native_language,
+            patterns=patterns_text
+        )
+        
+        # 4. Generate
+        try:
+            response = self.ai_client.generate_response(prompt, timeout=self.request_timeout)
+            if not response: return False, "Empty response from AI", []
+            
+            # 5. Parse
+            import json
+            # Extract JSON if wrapped in markdown
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group(0))
+                sentences = data.get('sentences', [])
+                
+                added_count = 0
+                generated_items = []
+                for s in sentences:
+                    # Add to DB
+                    content_id = self.db.add_imported_content(
+                        content_type='sentence',
+                        content=s['sentence'],
+                        context=f"Grammar Practice: {', '.join(s.get('patterns_used', []))}",
+                        title="Grammar Practice",
+                        url="ai-generated",
+                        language=self.study_language,
+                        tags="grammar-practice"
+                    )
+                    
+                    self.db.add_sentence_explanation(
+                        imported_content_id=content_id,
+                        sentence=s['sentence'],
+                        explanation=f"Translation: {s.get('translation', '')}\nPatterns: {', '.join(s.get('patterns_used', []))}",
+                        explanation_language='native',
+                        focus_area='grammar',
+                        grammar_notes=f"Practice based on: {', '.join(s.get('patterns_used', []))}",
+                        user_notes="",
+                        created_at=datetime.now().isoformat(),
+                        last_updated=datetime.now().isoformat(),
+                        source='ai-practice',
+                        suggestions=None
+                    )
+
+                    added_count += 1
+                    generated_items.append(s)
+                
+                return True, f"Generated {added_count} sentences.", generated_items
+            else:
+                 return False, "Failed to parse AI response (JSON not found)", []
+                 
+        except Exception as e:
+            return False, f"Error: {e}", []
+
 
     # ========== MANUAL CONTENT ENTRY ==========
     
@@ -1430,6 +1513,10 @@ Any important exceptions or nuances.
     def create_chat_session(self, topic: str) -> int:
         """Create a new chat session."""
         return self.db.create_chat_session(topic, self.study_language)
+    
+    def create_roleplay_chat_session(self, scenario_id: int, character_context: Optional[str] = None) -> int:
+        """Create a new roleplay chat session."""
+        return self.db.create_roleplay_chat_session(scenario_id, self.study_language, character_context)
 
     def get_chat_sessions(self) -> List[Dict]:
         """Get list of chat sessions."""
@@ -1438,6 +1525,42 @@ Any important exceptions or nuances.
     def get_chat_messages(self, session_id: int) -> List[Dict]:
         """Get all messages for a session."""
         return self.db.get_chat_messages(session_id)
+    
+    # ========== ROLEPLAY SCENARIO MANAGEMENT ==========
+    
+    def create_roleplay_scenario(self, name: str, description: str, user_role: str, situation: str, characters: List[Dict]) -> int:
+        """Create a new roleplay scenario. characters is a list of dicts with name, role, personality."""
+        import json
+        characters_json = json.dumps(characters)
+        return self.db.create_roleplay_scenario(name, description, user_role, situation, characters_json)
+    
+    def get_roleplay_scenarios(self) -> List[Dict]:
+        """Get all roleplay scenarios."""
+        import json
+        scenarios = self.db.get_roleplay_scenarios()
+        for scenario in scenarios:
+            if scenario['characters']:
+                scenario['characters'] = json.loads(scenario['characters'])
+        return scenarios
+    
+    def get_roleplay_scenario(self, scenario_id: int) -> Optional[Dict]:
+        """Get a specific roleplay scenario by ID."""
+        import json
+        scenario = self.db.get_roleplay_scenario(scenario_id)
+        if scenario and scenario['characters']:
+            scenario['characters'] = json.loads(scenario['characters'])
+        return scenario
+    
+    def update_roleplay_scenario(self, scenario_id: int, name: str = None, description: str = None,
+                                user_role: str = None, situation: str = None, characters: List[Dict] = None) -> bool:
+        """Update a roleplay scenario."""
+        import json
+        characters_json = json.dumps(characters) if characters else None
+        return self.db.update_roleplay_scenario(scenario_id, name, description, user_role, situation, characters_json)
+    
+    def delete_roleplay_scenario(self, scenario_id: int) -> bool:
+        """Delete a roleplay scenario."""
+        return self.db.delete_roleplay_scenario(scenario_id)
 
     def send_chat_message(self, session_id: int, user_message: str, current_history: List[Dict]) -> Tuple[bool, Dict, Dict]:
         """Send a message to the AI and process the response."""
@@ -1449,15 +1572,40 @@ Any important exceptions or nuances.
         
         # 2. Build Prompt
         session = next((s for s in self.get_chat_sessions() if s['id'] == session_id), None)
-        topic = session['cur_topic'] if session else "General Conversation"
+        if not session:
+            return False, {"error": "Session not found"}, {}
         
-        prompt_template = self._get_effective_prompt('chat', 'system_roleplay')
-        system_prompt = prompt_template.format(
-            persona="Language Tutor",
-            study_language=self.study_language,
-            native_language=self.native_language,
-            topic=topic
-        )
+        topic = session['cur_topic'] if session else "General Conversation"
+        mode = session.get('mode', 'topical')
+        
+        # Build system prompt based on mode
+        if mode == 'roleplay' and session.get('scenario_id'):
+            scenario = self.get_roleplay_scenario(session['scenario_id'])
+            if not scenario:
+                return False, {"error": "Roleplay scenario not found"}, {}
+            
+            # Build character descriptions
+            characters_desc = ""
+            for char in scenario['characters']:
+                characters_desc += f"- {char['name']} ({char['role']}): {char.get('personality', 'No description')}\n"
+            
+            prompt_template = self._get_effective_prompt('roleplay', 'system_roleplay_scenario')
+            system_prompt = prompt_template.format(
+                situation=scenario['situation'],
+                user_role=scenario['user_role'],
+                characters_description=characters_desc,
+                study_language=self.study_language,
+                native_language=self.native_language
+            )
+        else:
+            # Topical mode
+            prompt_template = self._get_effective_prompt('chat', 'system_roleplay')
+            system_prompt = prompt_template.format(
+                persona="Language Tutor",
+                study_language=self.study_language,
+                native_language=self.native_language,
+                topic=topic
+            )
         
         # Construct full prompt with history
         full_prompt = f"System: {system_prompt}\n\n Conversation History:\n"
@@ -1476,7 +1624,7 @@ Any important exceptions or nuances.
             
             if content:
                 # 4. Parse Response (XML)
-                parsed_data, suggestions = self._parse_chat_response(content)
+                parsed_data, suggestions = self._parse_chat_response(content, mode)
                 
                 # 5. Save Assistant Message
                 import json
@@ -1496,8 +1644,8 @@ Any important exceptions or nuances.
             traceback.print_exc()
             return False, {"error": f"Error: {e}"}, {}
 
-    def _parse_chat_response(self, text: str) -> Tuple[Dict, Dict]:
-        """Parse structured chat response."""
+    def _parse_chat_response(self, text: str, mode: str = 'topical') -> Tuple[Dict, Dict]:
+        """Parse structured chat response. Handles both topical and roleplay modes."""
         
         # Helpers to extract tag content
         def extract_tag(tag, source):
@@ -1505,14 +1653,24 @@ Any important exceptions or nuances.
             match = re.search(pattern, source, re.DOTALL | re.IGNORECASE)
             return match.group(1).strip() if match else ""
         
-        reply = extract_tag('reply', text)
+        # Extract feedback, vocab, grammar sections (same for both modes)
         feedback = extract_tag('feedback', text)
         vocab_section = extract_tag('vocab', text)
         grammar_section = extract_tag('grammar', text)
         
-        # Fallback if XML fails (LLM forgot format)
-        if not reply:
-            reply = text # Assume whole text is reply
+        # Extract reply based on mode
+        if mode == 'roleplay':
+            # For roleplay, parse multi-character dialogue
+            reply = self._parse_character_dialogue(text)
+            if not reply:
+                # Fallback: extract <characters> tag content
+                characters_section = extract_tag('characters', text)
+                reply = characters_section if characters_section else text
+        else:
+            # For topical, extract simple <reply> tag
+            reply = extract_tag('reply', text)
+            if not reply:
+                reply = text  # Fallback: assume whole text is reply
         
         # Extract structured items from vocab/grammar sections
         parsed_suggestions = {
@@ -1533,5 +1691,38 @@ Any important exceptions or nuances.
             'reply': reply,
             'feedback': feedback,
             'vocab_section': vocab_section,
-            'grammar_section': grammar_section
+            'grammar_section': grammar_section,
+            'mode': mode
         }, parsed_suggestions
+    
+    def _parse_character_dialogue(self, text: str) -> str:
+        """Parse multi-character dialogue from roleplay responses."""
+        # Extract all <character> tags and format them
+        pattern = r'<character\s+name="([^"]+)"\s+role="([^"]+)">(.+?)</character>'
+        matches = re.finditer(pattern, text, re.DOTALL | re.IGNORECASE)
+        
+        dialogue = ""
+        for match in matches:
+            name = match.group(1)
+            role = match.group(2)
+            content = match.group(3).strip()
+            dialogue += f"**{name}** ({role}): {content}\n"
+        
+        return dialogue if dialogue else ""
+
+    def _get_effective_prompt(self, category: str, key: str) -> str:
+        """Get effective prompt template."""
+        if category == 'word':
+            template_key = 'native_template' if self.prefer_native_definitions else 'study_template'
+            return WORD_PROMPTS.get(key, {}).get(template_key, "")
+        elif category == 'sentence':
+            return SENTENCE_PROMPTS.get(key, {}).get('template', "")
+        elif category == 'chat':
+            return CHAT_PROMPTS.get(key, {}).get('template', "")
+        elif category == 'writing':
+            return WRITING_PROMPTS.get(key, {}).get('template', "")
+        elif category == 'roleplay':
+            return ROLEPLAY_PROMPTS.get(key, {}).get('template', "")
+        elif category == 'practice':
+            return PRACTICE_PROMPTS.get(key, {}).get('template', "")
+        return ""

@@ -11,9 +11,17 @@ from datetime import datetime
 import sys
 import io
 
-# Ensure UTF-8 output on Windows
-if sys.stdout.encoding != 'utf-8':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+# Ensure UTF-8 output on Windows for both stdout and stderr
+def setup_encoding():
+    try:
+        if sys.stdout.encoding != 'utf-8':
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='backslashreplace')
+        if sys.stderr.encoding != 'utf-8':
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='backslashreplace')
+    except Exception:
+        pass # Fallback to default if wrapping fails
+
+setup_encoding()
 
 app = Flask(__name__)
 db = FlashcardDatabase()
@@ -42,7 +50,8 @@ def get_decks():
     """Get all decks."""
     try:
         language = request.args.get('language')
-        print(f'[API] GET /decks - fetching all decks (language={language})', flush=True)
+        safe_lang = str(language).encode('ascii', 'backslashreplace').decode('ascii') if language else 'None'
+        print(f'[API] GET /decks - fetching all decks (language={safe_lang})', flush=True)
         decks = db.get_all_decks(language=language)
         print(f'[API] Found {len(decks)} decks', flush=True)
         return jsonify({"success": True, "decks": decks})
@@ -351,7 +360,9 @@ def get_imported_content():
         
         return jsonify({"success": True, "content": content})
     except Exception as e:
-        print(f'[API] Error getting imported content: {str(e)}', flush=True)
+        # Safe logging of error
+        err_msg = str(e).encode('ascii', 'backslashreplace').decode('ascii')
+        print(f'[API] Error getting imported content: {err_msg}', flush=True)
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 400
@@ -394,13 +405,15 @@ def add_imported_content():
         )
         print(f'[API] SUCCESS! content_id={content_id}', flush=True)
         
+        # Avoid putting Unicode in the success message if it might be logged
         return jsonify({
             "success": True, 
             "content_id": content_id,
-            "message": f"Imported {content_type}: {content[:50]}..."
+            "message": f"Imported {content_type} successfully"
         })
     except Exception as e:
-        print(f'[API] ERROR: {str(e)}', flush=True)
+        err_msg = str(e).encode('ascii', 'backslashreplace').decode('ascii')
+        print(f'[API] ERROR: {err_msg}', flush=True)
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 400

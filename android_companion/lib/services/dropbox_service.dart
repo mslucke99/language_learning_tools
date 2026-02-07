@@ -12,7 +12,7 @@ import 'package:path/path.dart' as p;
 
 class DropboxService {
   static const String clientId = 'ax4jmmkstls02hc';
-  static const String redirectUri = 'languagelearning://auth_callback';
+  static const String redirectUri = 'getchafluentia://auth_callback';
 
   final _storage = const FlutterSecureStorage();
   String? _accessToken;
@@ -64,7 +64,7 @@ class DropboxService {
     _sub = AppLinks().uriLinkStream.listen(
       (Uri? uri) async {
         if (uri != null &&
-            uri.scheme == 'languagelearning' &&
+            uri.scheme == 'getchafluentia' &&
             uri.host == 'auth_callback') {
           final code = uri.queryParameters['code'];
           if (code != null) {

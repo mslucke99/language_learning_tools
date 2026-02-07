@@ -1,11 +1,11 @@
 {
-    "name": "android_companion",
-    "short_name": "android_companion",
+    "name": "Getcha Fluentia",
+    "short_name": "Getcha Fluentia",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Getcha Fluentia - Your language learning companion.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

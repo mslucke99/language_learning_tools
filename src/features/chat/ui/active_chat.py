@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, scrolledtext
 import json
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.ui_utils import setup_standard_header
+from src.core.ui.related_items_panel import add_suggestion_to_storage
 
 class ActiveChatFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, session_id: int):
@@ -18,6 +19,7 @@ class ActiveChatFrame(ttk.Frame):
         
     def setup_ui(self):
         session_info = next((s for s in self.study_manager.get_chat_sessions() if s['id'] == self.active_session_id), None)
+        mode = session_info.get('mode', 'topical') if session_info else 'topical'
         title = f"💬 Chat: {session_info['cur_topic']}" if session_info else "Chat"
         setup_standard_header(self, title, back_cmd=self.go_back)
         
@@ -32,6 +34,7 @@ class ActiveChatFrame(ttk.Frame):
         self.chat_display.pack(fill="both", expand=True, pady=(0, 10))
         self.chat_display.tag_config("user", foreground="#007ACC", justify="right")
         self.chat_display.tag_config("assistant", foreground="#2E7D32")
+        self.chat_display.tag_config("character", foreground="#8B008B", font=("Segoe UI", 10, "bold"))  # For roleplay characters
         self.chat_display.tag_config("system", foreground="gray", font=("Segoe UI", 9, "italic"))
         
         input_frame = ttk.Frame(chat_frame)
@@ -67,6 +70,9 @@ class ActiveChatFrame(ttk.Frame):
 
     def _refresh_chat_history(self):
         messages = self.study_manager.get_chat_messages(self.active_session_id)
+        session = next((s for s in self.study_manager.get_chat_sessions() if s['id'] == self.active_session_id), None)
+        mode = session.get('mode', 'topical') if session else 'topical'
+        
         self.chat_display.configure(state="normal")
         self.chat_display.delete("1.0", "end")
         
@@ -77,7 +83,12 @@ class ActiveChatFrame(ttk.Frame):
             if role == "user":
                 self.chat_display.insert("end", f"You: {content}\n\n", "user")
             else:
-                self.chat_display.insert("end", f"Tutor: {content}\n\n", "assistant")
+                # For roleplay mode, display multi-character dialogue with formatting
+                if mode == 'roleplay' and '**' in content:
+                    # Content already formatted with character names
+                    self.chat_display.insert("end", f"{content}\n\n", "character")
+                else:
+                    self.chat_display.insert("end", f"Tutor: {content}\n\n", "assistant")
                 
             if msg.get('analysis'):
                 try:
@@ -142,28 +153,28 @@ class ActiveChatFrame(ttk.Frame):
              self.grammar_tab.configure(state="disabled")
 
     def _add_suggestion(self, item, type_name):
+        """Add a suggestion using the shared utility."""
         try:
+            # Check for duplicates for word type
             if type_name == 'word':
-                # Check duplicate
-                existing = self.study_manager.db.find_flashcard_by_question(item['word'])
+                existing = self.study_manager.db.find_flashcard_by_question(item.get('word', ''))
                 if existing:
                     if not messagebox.askyesno("Duplicate", f"Word '{item['word']}' exists. Add anyway?"):
                         return
-
-                content_id = self.study_manager.db.add_imported_content(
-                    'word', item['word'], url="Chat Suggestion",
-                    title="Interactive Chat", language=self.study_manager.study_language
-                )
-                self.study_manager.add_word_definition(
-                    content_id, item['definition'], definition_language=self.study_manager.native_language
-                )
-                messagebox.showinfo("Saved", f"Added '{item['word']}'")
-                
-            elif type_name == 'grammar':
-                self.study_manager.db.add_grammar_entry(
-                    item['title'], item['explanation'], language=self.study_manager.study_language, tags="chat-generated"
-                )
-                messagebox.showinfo("Saved", f"Added '{item['title']}'")
+            
+            success = add_suggestion_to_storage(
+                self.study_manager.db,
+                self.study_manager,
+                item,
+                type_name,
+                source="Chat Suggestion"
+            )
+            
+            if success:
+                label = item.get('word', '') if type_name == 'word' else item.get('title', '')
+                messagebox.showinfo("Saved", f"Added '{label}'")
+            else:
+                messagebox.showerror("Error", "Failed to add item")
                 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to add: {e}")

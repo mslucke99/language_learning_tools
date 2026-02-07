@@ -3,7 +3,8 @@ from tkinter import ttk, messagebox, scrolledtext
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header, bind_mousewheel
-from src.features.study_center.ui.dialogs import ManageCollectionsDialog, MoveItemDialog, DeckPickerDialog
+from src.core.ui.related_items_panel import RelatedItemsPanel
+from src.features.study_center.ui.dialogs import ManageCollectionsDialog, MoveItemDialog
 
 class SentencesViewFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, db: FlashcardDatabase, embedded=False):
@@ -108,12 +109,17 @@ class SentencesViewFrame(ttk.Frame):
         self.sentence_grammar_text = scrolledtext.ScrolledText(tab_grammar, font=("Arial", 10), wrap="word")
         self.sentence_grammar_text.pack(fill="both", expand=True)
         
-        # Tab 3: Related Items (Suggestions)
+        # Tab 3: Related Items (Suggestions) - Using reusable component
         self.tab_suggestions = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(self.tab_suggestions, text="Related Items")
-        self.suggestions_frame = ttk.Frame(self.tab_suggestions)
-        self.suggestions_frame.pack(fill="both", expand=True)
-        ttk.Label(self.suggestions_frame, text="Use 'Explain' to generate suggested flashcards and grammar patterns.", font=("Arial", 9, "italic")).pack(pady=20)
+        self.related_items_panel = RelatedItemsPanel(
+            self.tab_suggestions, 
+            self.db, 
+            self.study_manager,
+            show_deck_choice=True
+        )
+        self.related_items_panel.pack(fill="both", expand=True)
+        self.related_items_panel._show_placeholder("Use 'Explain' to generate suggested flashcards and grammar patterns.")
         
         # Tab 4: Personal Notes
         tab_notes = ttk.Frame(self.notebook, padding="10")
@@ -147,6 +153,7 @@ class SentencesViewFrame(ttk.Frame):
         
         if self.ai_available:
              ttk.Button(left_pane, text="⚡ Batch Explain", command=self._start_batch_sentences).pack(fill="x", pady=5)
+             ttk.Button(left_pane, text="✨ Grammar Practice", command=self._start_grammar_practice).pack(fill="x", pady=5)
 
     def go_back(self):
         if hasattr(self.controller, 'show_study_dashboard'):
@@ -226,8 +233,7 @@ class SentencesViewFrame(ttk.Frame):
         self.current_sentence_explanation_id = None
         
         # Clear suggestions
-        for widget in self.suggestions_frame.winfo_children(): widget.destroy()
-        ttk.Label(self.suggestions_frame, text="Use 'Explain' to generate suggested flashcards and grammar patterns.", font=("Arial", 9, "italic")).pack(pady=20)
+        self.related_items_panel._show_placeholder("Use 'Explain' to generate suggested flashcards and grammar patterns.")
         
         if explanation:
             self.sentence_explanation_text.insert(tk.END, explanation['explanation'])
@@ -238,7 +244,7 @@ class SentencesViewFrame(ttk.Frame):
             
             # Load suggestions if they exist
             if 'suggestions' in explanation and explanation['suggestions']:
-                self._populate_suggestions(explanation['suggestions'])
+                self.related_items_panel.populate(explanation['suggestions'])
         else:
             self.followup_history_text.config(state="normal")
             self.followup_history_text.delete(1.0, tk.END)
@@ -317,7 +323,8 @@ class SentencesViewFrame(ttk.Frame):
                       # Handle suggestions
                       suggestions = status.get('suggestions', {})
                       if suggestions:
-                          self._populate_suggestions(suggestions)
+                          self.related_items_panel.populate(suggestions)
+                          self.notebook.select(self.tab_suggestions)
                           
                       messagebox.showinfo("Complete", "Explanation ready!")
                  elif status['status'] == 'failed':
@@ -385,90 +392,9 @@ class SentencesViewFrame(ttk.Frame):
               self.followup_history_text.insert(tk.END, f"Q: {f['question']}\nA: {f['answer']}\n\n")
          self.followup_history_text.config(state="disabled")
          
-    def _populate_suggestions(self, suggestions):
-        for widget in self.suggestions_frame.winfo_children(): widget.destroy()
-        
-        # Check if empty
-        if not suggestions.get('flashcards') and not suggestions.get('grammar'):
-             ttk.Label(self.suggestions_frame, text="No specific suggestions found.", font=("Arial", 9, "italic")).pack(pady=20)
-             return
-             
-        # Add Flashcards
-        flashcards = suggestions.get('flashcards', [])
-        if flashcards:
-            ttk.Label(self.suggestions_frame, text="📚 Vocabulary Suggestions", font=("Arial", 10, "bold")).pack(anchor="w", pady=(10, 5))
-            for item in flashcards:
-                f = ttk.Frame(self.suggestions_frame)
-                f.pack(fill="x", pady=2)
-                ttk.Label(f, text=f"• {item['word']}", font=("Arial", 10, "bold")).pack(side="left")
-                ttk.Label(f, text=f": {item['definition']}", font=("Arial", 9)).pack(side="left", padx=5)
-                ttk.Button(f, text="Add", width=6, command=lambda i=item: self._add_suggestion(i, 'word')).pack(side="right")
+    # _populate_suggestions and _add_suggestion moved to RelatedItemsPanel component
 
-        # Add Grammar
-        grammar = suggestions.get('grammar', [])
-        if grammar:
-            ttk.Label(self.suggestions_frame, text="📖 Grammar Suggestions", font=("Arial", 10, "bold")).pack(anchor="w", pady=(20, 5))
-            for item in grammar:
-                f = ttk.Frame(self.suggestions_frame)
-                f.pack(fill="x", pady=2)
-                ttk.Label(f, text=f"• {item['title']}", font=("Arial", 10, "bold")).pack(side="left")
-                ttk.Button(f, text="Add", width=6, command=lambda i=item: self._add_suggestion(i, 'grammar')).pack(side="right")
-                ttk.Label(f, text=f"- {item['explanation'][:60]}...", font=("Arial", 9, "italic")).pack(side="left", padx=5)
-                
-        # Switch to suggestions tab to alert user
-        self.notebook.select(self.tab_suggestions)
 
-    def _add_suggestion(self, item, type_name):
-        try:
-            if type_name == 'word':
-                # Ask Destination
-                choice = messagebox.askyesnocancel("Add Word", f"Where should '{item['word']}' be saved?\n\nYes: Flashcard Deck\nNo: Vocabulary List (Study Center)")
-                if choice is None: return
-
-                if choice: # Yes -> Deck
-                    deck_id = DeckPickerDialog(self.winfo_toplevel(), self.db).show()
-                    if not deck_id: return
-                    
-                    # Check duplicate in deck
-                    existing = self.db.find_flashcard_in_deck(deck_id, item['word'])
-                    if existing:
-                        if not messagebox.askyesno("Duplicate", f"Card '{item['word']}' already in this deck. Add anyway?"):
-                            return
-                    
-                    self.db.add_flashcard(deck_id, item['word'], item['definition'])
-                    messagebox.showinfo("Saved", "Added flashcard to deck!")
-                    
-                else: # No -> Vocabulary List
-                    # Check for duplicate manually first (optional UI check)
-                    existing = self.study_manager.db.find_flashcard_by_question(item['word'])
-                    if existing:
-                        if not messagebox.askyesno("Duplicate", f"The word '{item['word']}' might already exist in deck '{existing[0]['deck_name']}'. Add anyway?"):
-                            return
-                    
-                    # Add content
-                    content_id = self.study_manager.db.add_imported_content(
-                        'word', item['word'], 
-                        url="AI Suggestion", 
-                        title="Sentence Analysis", 
-                        language=self.study_manager.study_language
-                    )
-                    self.study_manager.add_word_definition(
-                        content_id, item['definition'], 
-                        definition_language=self.study_manager.native_language
-                    )
-                    messagebox.showinfo("Saved", f"Added '{item['word']}' to your collection.")
-                
-            elif type_name == 'grammar':
-                self.study_manager.db.add_grammar_entry(
-                    item['title'], 
-                    item['explanation'], 
-                    language=self.study_manager.study_language,
-                    tags="auto-generated"
-                )
-                messagebox.showinfo("Saved", f"Added grammar pattern '{item['title']}'.")
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to add item: {e}")
 
     def _start_batch_sentences(self):
         count = self.study_manager.batch_generate_sentences()
@@ -476,6 +402,29 @@ class SentencesViewFrame(ttk.Frame):
             messagebox.showinfo("Batch Started", f"Queued explanations for {count} sentences.\nUse 'Refresh' periodically to see updates.")
         else:
             messagebox.showinfo("Batch info", "No sentences found needing explanations.")
+
+    def _start_grammar_practice(self):
+        if not messagebox.askyesno("Grammar Practice", "Generate 3 practice sentences using your Mastered grammar?"):
+            return
+            
+        # Visual feedback
+        orig_text = self.sentences_tree.heading("#0", option="text")
+        self.sentences_tree.heading("#0", text="⏳ Generating...") 
+        
+        def run():
+            success, msg, items = self.study_manager.generate_grammar_practice_sentences(3)
+            self.after(0, lambda: self._on_grammar_practice_done(success, msg, orig_text))
+            
+        import threading
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_grammar_practice_done(self, success, msg, orig_text):
+        self.sentences_tree.heading("#0", text=orig_text)
+        if success:
+            messagebox.showinfo("Success", msg)
+            self._refresh_data_manual()
+        else:
+            messagebox.showerror("Error", msg)
 
     def _refresh_data_manual(self):
         self.sentences_data = self.study_manager.get_imported_sentences()

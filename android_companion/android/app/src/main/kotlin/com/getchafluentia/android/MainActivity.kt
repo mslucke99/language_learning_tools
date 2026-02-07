@@ -1,4 +1,4 @@
-package com.languagelearning.android_companion
+package com.getchafluentia.android
 
 import io.flutter.embedding.android.FlutterActivity
 

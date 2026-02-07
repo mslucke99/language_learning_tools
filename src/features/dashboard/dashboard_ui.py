@@ -25,7 +25,9 @@ from src.features.chat.ui.active_chat import ActiveChatFrame
 from src.features.dashboard.settings_ui import SettingsUI as SettingsFrame
 from src.features.dashboard.task_queue_ui import TaskQueueDialog
 from src.features.dashboard.dev_console_ui import DevConsoleDialog
-from src.services.dropbox_sync import dropbox_manager
+# from src.services.dropbox_sync import dropbox_manager # Removing Dropbox ref
+from src.services.auth_service import AuthService
+from src.services.firestore_sync import FirestoreSyncManager
 
 class DashboardApp:
     def __init__(self, root):
@@ -40,6 +42,13 @@ class DashboardApp:
         self.ai_available = self.study_manager.ai_available
         
         self.io_manager = ImportExportManager(self.db, self.study_manager)
+
+        # Auth & Sync
+        self.auth_service = AuthService()
+        self.sync_manager = FirestoreSyncManager(self.db.db_path)
+        self.current_user_id = self.auth_service.get_current_user_id()
+        if self.current_user_id:
+            self.sync_manager.set_user_id(self.current_user_id)
         
         # Apply Persisted UI Locale
         set_locale(self.study_manager.ui_language)
@@ -69,7 +78,20 @@ class DashboardApp:
         self.show_home()
         
         # Start periodic updates
+        # Start periodic updates
         self._update_status_bar()
+        
+        # Bind Global Shortcuts
+        self.bind_global_shortcuts()
+        
+    def bind_global_shortcuts(self):
+        """Bind global navigation shortcuts."""
+        self.root.bind("<Control-D>", lambda e: self.show_flashcards_dashboard())
+        self.root.bind("<Control-S>", lambda e: self.show_study_center_dashboard())
+        self.root.bind("<Control-C>", lambda e: self.show_chat_dashboard())
+        self.root.bind("<Control-W>", lambda e: self.show_writing_lab_view())
+        self.root.bind("<Control-Q>", lambda e: self.show_quiz_setup())
+        # Use simple Ctrl+Letter for main navigation, Shift is often too complex for frequent use
         
     def _preload_ai_model(self):
         import threading
@@ -202,6 +224,9 @@ class DashboardApp:
 
         self.sync_btn = ttk.Button(self.status_bar, text="🔄 Sync", command=self.perform_global_sync, width=8)
         self.sync_btn.pack(side="right", padx=5)
+
+        self.login_btn = ttk.Button(self.status_bar, text="Sign In", command=self.perform_sign_in, width=10)
+        self.login_btn.pack(side="right", padx=5)
         
     def _update_status_bar(self):
         # Update AI Service Status
@@ -233,9 +258,27 @@ class DashboardApp:
         else:
             self.queue_status_label.config(text="AI Tasks: 0", font=("Segoe UI", 9))
             self.task_mgr_btn.config(text="📋 Tasks")
-            
+        
+        # Update Auth Status
+        if self.current_user_id:
+             self.login_btn.pack_forget() # Hide login if logged in
+             self.sync_btn.pack(side="right", padx=5) # Ensure sync is visible
+        else:
+             self.sync_btn.pack_forget() # Hide sync if not logged in
+             self.login_btn.pack(side="right", padx=5)
+
         # Schedule next update (every 3 seconds)
         self.root.after(3000, self._update_status_bar)
+
+    def perform_sign_in(self):
+        try:
+            info = self.auth_service.sign_in()
+            self.current_user_id = info.get('id')
+            self.sync_manager.set_user_id(self.current_user_id)
+            messagebox.showinfo("Signed In", f"Welcome, {info.get('name')}!")
+            self._update_status_bar()
+        except Exception as e:
+            messagebox.showerror("Sign In Error", f"Failed to sign in:\n{e}")
 
     def show_task_manager(self):
         TaskQueueDialog(self.root, self.study_manager)
@@ -245,63 +288,32 @@ class DashboardApp:
 
     def perform_global_sync(self):
         """Perform a full cloud sync (download + merge) from the status bar."""
-        if not dropbox_manager.is_authenticated():
-            messagebox.showwarning("Sync", "Dropbox not connected. Please go to Settings > Cloud Sync.")
-            return
+        if not self.current_user_id:
+             messagebox.showwarning("Sync", "Please Sign In first.")
+             return
 
         # Disable button during sync
-        self.sync_btn.config(state="disabled")
+        self.sync_btn.state(['disabled'])
         self.root.config(cursor="wait")
         self.root.update()
 
         try:
-            # 1. Download
-            success, temp_path, message = dropbox_manager.download_db_to_temp()
-            if not success:
-                if "No backup found" in message:
-                    # Offer to initialize
-                    confirm = messagebox.askyesno("First-Time Sync", 
-                        "No cloud backup found on Dropbox.\n\nWould you like to upload your local data as the initial cloud copy?")
-                    if confirm:
-                        success_up, msg_up = dropbox_manager.upload_db()
-                        if success_up:
-                            messagebox.showinfo("Sync Initialized", "Initial upload complete! You can now sync from other devices.")
-                        else:
-                            messagebox.showerror("Upload Failed", msg_up)
-                else:
-                    messagebox.showerror("Sync Failed", message)
-                return
-
-            # 2. Merge
-            from src.services.sync_merger import SyncMerger
-            from src.services.conflict_dialog import show_conflict_dialog
+            stats = self.sync_manager.sync()
             
-            resolver = lambda data: show_conflict_dialog(self.root, data)
-            merger = SyncMerger(self.db.db_path, temp_path)
-            merger.on_conflict = resolver
-            
-            stats = merger.perform_merge()
-            
-            # 3. Reload
-            self.reload_db()
-            
-            # Refresh current view
-            self.show_home() 
-
-            # Cleanup
-            import os
-            try: os.remove(temp_path)
-            except: pass
-
-            messagebox.showinfo("Sync Complete", 
-                f"Sync successful!\nAdded: {stats['added']}\nUpdated: {stats['updated']}\nConflicts: {stats['conflicts_resolved']}")
+            if "error" in stats:
+                 messagebox.showerror("Sync Error", stats["error"])
+            else:
+                self.reload_db()
+                self.show_home() # Refresh view
+                messagebox.showinfo("Sync Complete", 
+                    f"Sync successful!\nDownloaded: {stats['downloaded']}\nUploaded: {stats['uploaded']}\nConflicts: {stats['conflicts']}")
             
         except Exception as e:
             import traceback
             traceback.print_exc()
             messagebox.showerror("Sync Error", str(e))
         finally:
-            self.sync_btn.config(state="normal")
+            self.sync_btn.state(['!disabled'])
             self.root.config(cursor="")
 
     def reload_db(self):

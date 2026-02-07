@@ -18,6 +18,31 @@ class ReviewSessionFrame(ttk.Frame):
         
         self.start_review()
         
+        # Bind events for cleanup
+        self.bind("<Destroy>", self._unbind_shortcuts)
+        
+    def _bind_shortcuts(self, event=None):
+        if not self.winfo_exists(): return
+        root = self.winfo_toplevel()
+        
+        # Reveal shortcuts
+        root.bind("<space>", self.reveal_answer, add="+")
+        root.bind("<Return>", self.reveal_answer, add="+")
+        
+        # Rating shortcuts
+        for i in range(6):
+            root.bind(str(i), lambda e, q=i: self.submit_rating(q), add="+")
+            
+    def _unbind_shortcuts(self, event=None):
+        try:
+            root = self.winfo_toplevel()
+            root.unbind("<space>")
+            root.unbind("<Return>")
+            for i in range(6):
+                root.unbind(str(i))
+        except:
+            pass
+        
     def start_review(self):
         """Start reviewing cards."""
         due_cards = self.db.get_due_flashcards(self.deck_id)
@@ -30,6 +55,7 @@ class ReviewSessionFrame(ttk.Frame):
         self.current_index = 0
         self.answer_revealed = False
         self.show_review_card()
+        self._bind_shortcuts()
 
     def show_no_cards_message(self):
         self.clear_content()
@@ -79,10 +105,11 @@ class ReviewSessionFrame(ttk.Frame):
         
         if not self.answer_revealed:
             # Reveal button
-            self.show_answer_button = ttk.Button(self, text="Reveal Answer", command=self.reveal_answer, style="Large.TButton")
+            self.show_answer_button = ttk.Button(self, text="Reveal Answer (Space)", command=self.reveal_answer, style="Large.TButton")
             self.show_answer_button.pack(pady=15, fill="x", ipady=10)
 
-    def reveal_answer(self):
+    def reveal_answer(self, event=None):
+        if self.answer_revealed: return
         self.answer_revealed = True
         flashcard = self.current_flashcards[self.current_index]
         self.answer_label.config(text=flashcard.answer, font=("Arial", 12))
@@ -113,6 +140,7 @@ class ReviewSessionFrame(ttk.Frame):
             btn.pack(side="left", padx=3, fill="both", expand=True, ipady=8)
 
     def submit_rating(self, quality):
+        if not self.answer_revealed: return
         flashcard = self.current_flashcards[self.current_index]
         flashcard.mark_reviewed(quality)
         self.db.update_flashcard(flashcard)
@@ -129,8 +157,10 @@ class ReviewSessionFrame(ttk.Frame):
                  font=("Arial", 14)).pack(pady=10)
         
         ttk.Button(self, text="Back to Deck", command=self.go_back, style="Large.TButton").pack(pady=20)
+        self._unbind_shortcuts()
 
     def go_back(self):
+        self._unbind_shortcuts()
         if hasattr(self.controller, 'show_deck_menu'):
             self.controller.show_deck_menu(self.deck_id)
 
