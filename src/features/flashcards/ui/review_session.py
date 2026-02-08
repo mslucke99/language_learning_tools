@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from src.core.database import FlashcardDatabase
 from src.features.flashcards.logic.spaced_repetition import get_due_flashcards
+from src.core.localization import tr
 
 class ReviewSessionFrame(ttk.Frame):
     def __init__(self, parent, controller, db: FlashcardDatabase, deck_id: int):
@@ -59,8 +60,8 @@ class ReviewSessionFrame(ttk.Frame):
 
     def show_no_cards_message(self):
         self.clear_content()
-        ttk.Label(self, text="No cards due for review!", font=("Arial", 16)).pack(pady=50)
-        ttk.Button(self, text="Back to Deck", command=self.go_back, style="Large.TButton").pack(pady=20)
+        ttk.Label(self, text=tr("msg_no_cards_due", "No cards due for review!"), font=("Arial", 16)).pack(pady=50)
+        ttk.Button(self, text=tr("btn_back_to_deck", "Back to Deck"), command=self.go_back, style="Large.TButton").pack(pady=20)
         
     def show_review_card(self):
         """Show the current card during review."""
@@ -73,7 +74,7 @@ class ReviewSessionFrame(ttk.Frame):
         flashcard = self.current_flashcards[self.current_index]
         
         # Progress
-        progress_text = f"Card {self.current_index + 1} of {len(self.current_flashcards)}"
+        progress_text = tr("lbl_progress", "Card {index} of {total}", index=self.current_index + 1, total=len(self.current_flashcards))
         ttk.Label(self, text=progress_text, font=("Arial", 11, "bold")).pack(pady=10)
         
         # Progress bar
@@ -82,14 +83,14 @@ class ReviewSessionFrame(ttk.Frame):
         progress.pack(pady=10)
         
         # Question
-        ttk.Label(self, text="Question:", font=("Arial", 13, "bold")).pack(pady=15)
+        ttk.Label(self, text=tr("lbl_question", "Question:"), font=("Arial", 13, "bold")).pack(pady=15)
         question_frame = ttk.Frame(self, relief="sunken", borderwidth=2)
         question_frame.pack(fill="x", padx=20, pady=10)
         question_label = ttk.Label(question_frame, text=flashcard.question, wraplength=700, justify="center", font=("Arial", 12))
         question_label.pack(pady=25, padx=20)
         
         # Answer (hidden initially)
-        answer_frame = ttk.LabelFrame(self, text="Answer", padding="15")
+        answer_frame = ttk.LabelFrame(self, text=tr("lbl_answer", "Answer"), padding="15")
         answer_frame.pack(fill="x", padx=20, pady=15)
         
         if self.answer_revealed:
@@ -97,7 +98,7 @@ class ReviewSessionFrame(ttk.Frame):
             state = "disabled"
             self.show_rating_buttons()
         else:
-            answer_text = "[Click 'Reveal Answer' to see]"
+            answer_text = tr("msg_click_to_reveal", "[Click 'Reveal Answer' to see]")
         
         self.answer_label = ttk.Label(answer_frame, text=answer_text,
                                 wraplength=650, justify="center", font=("Arial", 12, "italic"))
@@ -105,7 +106,7 @@ class ReviewSessionFrame(ttk.Frame):
         
         if not self.answer_revealed:
             # Reveal button
-            self.show_answer_button = ttk.Button(self, text="Reveal Answer (Space)", command=self.reveal_answer, style="Large.TButton")
+            self.show_answer_button = ttk.Button(self, text=tr("btn_show_answer", "Reveal Answer (Space)"), command=self.reveal_answer, style="Large.TButton")
             self.show_answer_button.pack(pady=15, fill="x", ipady=10)
 
     def reveal_answer(self, event=None):
@@ -141,9 +142,14 @@ class ReviewSessionFrame(ttk.Frame):
 
     def submit_rating(self, quality):
         if not self.answer_revealed: return
-        flashcard = self.current_flashcards[self.current_index]
         flashcard.mark_reviewed(quality)
         self.db.update_flashcard(flashcard)
+        # Log for statistics
+        try:
+            self.db.log_review(flashcard.id, quality, review_desc='flashcard')
+        except Exception as e:
+            print(f"Error logging review: {e}")
+
         self.current_index += 1
         self.answer_revealed = False
         self.show_review_card()

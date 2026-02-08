@@ -1408,6 +1408,14 @@ Any important exceptions or nuances.
             return True, "Sentence added successfully"
         except Exception as e:
             return False, f"Error adding sentence: {str(e)}"
+
+    def delete_word(self, word_id: int) -> bool:
+        """Delete a word and its definitions."""
+        return self.db.delete_imported_content(word_id)
+
+    def delete_sentence(self, sentence_id: int) -> bool:
+        """Delete a sentence and its explanations."""
+        return self.db.delete_imported_content(sentence_id)
             
     # ========== STUDY STATISTICS ==========
     

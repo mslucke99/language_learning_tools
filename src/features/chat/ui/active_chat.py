@@ -4,6 +4,7 @@ import json
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.ui_utils import setup_standard_header
 from src.core.ui.related_items_panel import add_suggestion_to_storage
+from src.core.localization import tr
 
 class ActiveChatFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, session_id: int):
@@ -20,8 +21,8 @@ class ActiveChatFrame(ttk.Frame):
     def setup_ui(self):
         session_info = next((s for s in self.study_manager.get_chat_sessions() if s['id'] == self.active_session_id), None)
         mode = session_info.get('mode', 'topical') if session_info else 'topical'
-        title = f"💬 Chat: {session_info['cur_topic']}" if session_info else "Chat"
-        setup_standard_header(self, title, back_cmd=self.go_back)
+        title_text = tr("header_chat_with_topic", "💬 Chat: {topic}", topic=session_info['cur_topic'] if session_info else "...")
+        setup_standard_header(self, title_text, back_cmd=self.go_back)
         
         paned = tk.PanedWindow(self, orient="horizontal", sashrelief="raised", sashwidth=4)
         paned.pack(fill="both", expand=True, pady=5)
@@ -44,7 +45,7 @@ class ActiveChatFrame(ttk.Frame):
         self.chat_input.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.chat_input.bind("<Return>", lambda e: self._send_message())
         
-        self.send_btn = ttk.Button(input_frame, text="Send", command=self._send_message)
+        self.send_btn = ttk.Button(input_frame, text=tr("btn_send", "Send"), command=self._send_message)
         self.send_btn.pack(side="right")
         
         # --- RIGHT: ANALYSIS TABS ---
@@ -58,9 +59,9 @@ class ActiveChatFrame(ttk.Frame):
         self.vocab_tab = scrolledtext.ScrolledText(self.analysis_notebook, wrap="word", font=("Segoe UI", 10))
         self.grammar_tab = scrolledtext.ScrolledText(self.analysis_notebook, wrap="word", font=("Segoe UI", 10))
         
-        self.analysis_notebook.add(self.feedback_tab, text="Feedback")
-        self.analysis_notebook.add(self.vocab_tab, text="Vocabulary")
-        self.analysis_notebook.add(self.grammar_tab, text="Grammar")
+        self.analysis_notebook.add(self.feedback_tab, text=tr("tab_feedback", "Feedback"))
+        self.analysis_notebook.add(self.vocab_tab, text=tr("tab_vocab", "Vocabulary"))
+        self.analysis_notebook.add(self.grammar_tab, text=tr("tab_grammar", "Grammar"))
         
         self._refresh_chat_history()
 
@@ -81,14 +82,14 @@ class ActiveChatFrame(ttk.Frame):
             content = msg['content']
             
             if role == "user":
-                self.chat_display.insert("end", f"You: {content}\n\n", "user")
+                self.chat_display.insert("end", f"{tr('lbl_you', 'You')}: {content}\n\n", "user")
             else:
                 # For roleplay mode, display multi-character dialogue with formatting
                 if mode == 'roleplay' and '**' in content:
                     # Content already formatted with character names
                     self.chat_display.insert("end", f"{content}\n\n", "character")
                 else:
-                    self.chat_display.insert("end", f"Tutor: {content}\n\n", "assistant")
+                    self.chat_display.insert("end", f"{tr('lbl_tutor', 'Tutor')}: {content}\n\n", "assistant")
                 
             if msg.get('analysis'):
                 try:
@@ -142,7 +143,7 @@ class ActiveChatFrame(ttk.Frame):
                  self.grammar_tab.insert("end", "--- Suggested Grammar ---\n")
                  for item in grammar:
                      self.grammar_tab.insert("end", f"• {item['title']}\n")
-                     btn = ttk.Button(self.grammar_tab, text="Add", width=4, 
+                     btn = ttk.Button(self.grammar_tab, text=tr("btn_add", "Add"), width=4, 
                                     command=lambda i=item: self._add_suggestion(i, 'grammar'))
                      self.grammar_tab.window_create("end", window=btn)
                      self.grammar_tab.insert("end", f"\n{item['explanation'][:100]}...\n\n")
@@ -159,7 +160,7 @@ class ActiveChatFrame(ttk.Frame):
             if type_name == 'word':
                 existing = self.study_manager.db.find_flashcard_by_question(item.get('word', ''))
                 if existing:
-                    if not messagebox.askyesno("Duplicate", f"Word '{item['word']}' exists. Add anyway?"):
+                    if not messagebox.askyesno(tr("msg_duplicate", "Duplicate"), tr("msg_word_exists", "Word '{word}' exists. Add anyway?", word=item['word'])):
                         return
             
             success = add_suggestion_to_storage(
@@ -172,9 +173,9 @@ class ActiveChatFrame(ttk.Frame):
             
             if success:
                 label = item.get('word', '') if type_name == 'word' else item.get('title', '')
-                messagebox.showinfo("Saved", f"Added '{label}'")
+                messagebox.showinfo(tr("msg_success", "Saved"), tr("msg_saved", "Added '{label}'", label=label))
             else:
-                messagebox.showerror("Error", "Failed to add item")
+                messagebox.showerror(tr("error_title", "Error"), tr("error_failed_to_add", "Failed to add item"))
                 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to add: {e}")

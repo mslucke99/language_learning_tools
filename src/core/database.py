@@ -430,6 +430,28 @@ class FlashcardDatabase:
             print("[DB] Migrating sentence_explanations: adding suggestions column")
             cursor.execute("ALTER TABLE sentence_explanations ADD COLUMN suggestions TEXT")
 
+        # 6. Create review_logs table for advanced statistics
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS review_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                flashcard_id INTEGER NOT NULL,
+                review_desc TEXT, -- 'flashcard', 'quiz', etc.
+                grade INTEGER, -- 0-5 (supermemo quality)
+                time_taken INTEGER, -- seconds
+                review_date TEXT NOT NULL,
+                FOREIGN KEY (flashcard_id) REFERENCES flashcards (id) ON DELETE CASCADE
+            )
+        """)
+
+        self.conn.commit()
+
+    def log_review(self, flashcard_id: int, grade: int, time_taken: int = 0, review_desc: str = 'flashcard'):
+        """Log a review event for statistics."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT INTO review_logs (flashcard_id, review_desc, grade, time_taken, review_date) VALUES (?, ?, ?, ?, ?)",
+            (flashcard_id, review_desc, grade, time_taken, datetime.now().isoformat())
+        )
         self.conn.commit()
 
     def create_collection(self, name: str, type: str, parent_id: int = None, language: str = None) -> int:

@@ -5,6 +5,7 @@ from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header, bind_mousewheel
 from src.core.ui.related_items_panel import RelatedItemsPanel
 from src.features.study_center.ui.dialogs import ManageCollectionsDialog, MoveItemDialog
+from src.core.localization import tr
 
 class SentencesViewFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, db: FlashcardDatabase, embedded=False):
@@ -28,15 +29,15 @@ class SentencesViewFrame(ttk.Frame):
         if not self.embedded:
             setup_standard_header(
                 self, 
-                "Study Sentences", 
+                tr("header_sentences", "Study Sentences"), 
                 back_cmd=self.go_back,
-                action_text="+ Add Sentence",
+                action_text=tr("btn_add_sentence", "+ Add Sentence"),
                 action_cmd=self._add_manual_sentence_dialog
             )
         else:
             toolbar = ttk.Frame(self)
             toolbar.pack(fill="x", padx=10, pady=5)
-            ttk.Button(toolbar, text="+ Add New Sentence", command=self._add_manual_sentence_dialog).pack(side="right")
+            ttk.Button(toolbar, text=tr("btn_add_sentence", "+ Add New Sentence"), command=self._add_manual_sentence_dialog).pack(side="right")
         
         container = ttk.Frame(self)
         container.pack(fill="both", expand=True)
@@ -47,7 +48,7 @@ class SentencesViewFrame(ttk.Frame):
         # LEFT PANE: Sentence Tree
         left_pane = ttk.Frame(paned_window)
         paned_window.add(left_pane, weight=1)
-        ttk.Label(left_pane, text="Folders & Sentences", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        ttk.Label(left_pane, text=tr("lbl_folders_sentences", "Folders & Sentences"), font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
         
         ctrl_frame = ttk.Frame(left_pane)
         ctrl_frame.pack(fill="x", pady=(0, 5))
@@ -58,9 +59,11 @@ class SentencesViewFrame(ttk.Frame):
         
         status_frame = ttk.Frame(ctrl_frame)
         status_frame.pack(fill="x")
-        ttk.Label(status_frame, text="Status:").pack(side="left")
-        self.sent_status_var = tk.StringVar(value="All")
-        status_filter = ttk.Combobox(status_frame, textvariable=self.sent_status_var, values=["All", "Processed", "Unprocessed"], state="readonly", width=12)
+        ttk.Label(status_frame, text=tr("status_label", "Status:")).pack(side="left")
+        self.sent_status_var = tk.StringVar(value=tr("cat_all", "All"))
+        status_filter = ttk.Combobox(status_frame, textvariable=self.sent_status_var, 
+                                     values=[tr("cat_all", "All"), tr("cat_processed", "Processed"), tr("cat_unprocessed", "Unprocessed")], 
+                                     state="readonly", width=12)
         status_filter.pack(side="left", padx=5)
         status_filter.bind("<<ComboboxSelected>>", lambda e: self._update_sentences_view())
         
@@ -75,15 +78,15 @@ class SentencesViewFrame(ttk.Frame):
         
         tree_btns = ttk.Frame(left_pane)
         tree_btns.pack(fill="x", pady=5)
-        ttk.Button(tree_btns, text="📁 New Folder", command=lambda: ManageCollectionsDialog(self, self.db, 'sentence', self._update_sentences_view)).pack(side="left", padx=2, fill="x", expand=True)
-        ttk.Button(tree_btns, text="📂 Move Item", command=lambda: self._move_item_dialog()).pack(side="left", padx=2, fill="x", expand=True)
-        ttk.Button(tree_btns, text="🔄 Refresh", command=self._refresh_data_manual).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text=tr("btn_new_folder", "📁 New Folder"), command=lambda: ManageCollectionsDialog(self, self.db, 'sentence', self._update_sentences_view)).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text=tr("btn_move_item", "📂 Move Item"), command=lambda: self._move_item_dialog()).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text=tr("btn_refresh", "🔄 Refresh"), command=self._refresh_data_manual).pack(side="left", padx=2, fill="x", expand=True)
         
         # RIGHT PANE: Detail & Editor
         right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
         paned_window.add(right_pane, weight=3)
         
-        target_frame = ttk.LabelFrame(right_pane, text="Target Sentence", padding="10")
+        target_frame = ttk.LabelFrame(right_pane, text=tr("lbl_target_sentence", "Target Sentence"), padding="10")
         target_frame.pack(fill="x", pady=(0, 10))
         self.sentence_display_text = scrolledtext.ScrolledText(target_frame, height=3, font=("Arial", 11), wrap="word", state="disabled")
         self.sentence_display_text.pack(fill="both", expand=True)
@@ -93,7 +96,7 @@ class SentencesViewFrame(ttk.Frame):
         
         # Tab 1: AI Explanation
         tab_explanation = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(tab_explanation, text="AI Explanation")
+        self.notebook.add(tab_explanation, text=tr("tab_ai_explanation", "AI Explanation"))
         self.sentence_explanation_text = scrolledtext.ScrolledText(tab_explanation, font=("Arial", 10), wrap="word")
         self.sentence_explanation_text.pack(fill="both", expand=True, pady=(0, 10))
         
@@ -102,6 +105,7 @@ class SentencesViewFrame(ttk.Frame):
         if self.ai_available:
             ttk.Button(ai_action_frame, text="💬 Explain", command=self._generate_sentence_explanation).pack(side="left", padx=2)
         ttk.Button(ai_action_frame, text="Save", command=self._save_sentence_explanation).pack(side="right")
+        ttk.Button(ai_action_frame, text="Delete", command=self._delete_sentence).pack(side="right", padx=5)
         
         # Tab 2: Grammar Notes
         tab_grammar = ttk.Frame(self.notebook, padding="10")
@@ -160,6 +164,10 @@ class SentencesViewFrame(ttk.Frame):
             self.controller.show_study_dashboard()
 
     def _update_sentences_view(self):
+        # Preservation
+        scroll_pos = self.sentences_tree.yview()
+        selected_iid = self.sentences_tree.selection()
+
         search_query = self.sent_search_var.get().lower().strip()
         status_filter = self.sent_status_var.get()
         
@@ -204,6 +212,15 @@ class SentencesViewFrame(ttk.Frame):
             status = "✓" if s['has_explanation'] else "○"
             snippet = s['sentence'][:30] + ("..." if len(s['sentence']) > 30 else "")
             self.sentences_tree.insert(parent, "end", iid=f"sent_{s['id']}", text=f"{status} {snippet}")
+
+        # Restore
+        try:
+            self.sentences_tree.yview_moveto(scroll_pos[0])
+            if selected_iid:
+                if self.sentences_tree.exists(selected_iid[0]):
+                    self.sentences_tree.selection_set(selected_iid[0])
+                    self.sentences_tree.see(selected_iid[0])
+        except: pass
 
     def _on_sentence_selected(self, event):
         selection = self.sentences_tree.selection()
@@ -429,3 +446,34 @@ class SentencesViewFrame(ttk.Frame):
     def _refresh_data_manual(self):
         self.sentences_data = self.study_manager.get_imported_sentences()
         self._update_sentences_view()
+
+    def _delete_sentence(self):
+        if not self.current_sentence_id:
+            return
+
+        if messagebox.askyesno(tr("lbl_confirm_delete", "Confirm Delete"), tr("msg_confirm_delete_prompt", "Are you sure you want to delete this item?")):
+            if self.study_manager.delete_sentence(self.current_sentence_id):
+                messagebox.showinfo(tr("msg_success", "Success"), tr("msg_deleted", "Item deleted."))
+                self.sentences_data = self.study_manager.get_imported_sentences()
+                self._update_sentences_view()
+                self.current_sentence_id = None
+                self.sentence_display_text.config(state="normal")
+                self.sentence_display_text.delete(1.0, tk.END)
+                self.sentence_display_text.config(state="disabled")
+                self.sentence_explanation_text.delete(1.0, tk.END)
+                self.sentence_grammar_text.delete(1.0, tk.END)
+                self.sentence_notes_text.delete(1.0, tk.END)
+                self.followup_history_text.config(state="normal")
+                self.followup_history_text.delete(1.0, tk.END)
+                self.followup_history_text.config(state="disabled")
+            else:
+                messagebox.showerror(tr("msg_error", "Error"), tr("msg_delete_failed", "Failed to delete item."))
+
+    def on_show(self):
+        """Lifecycle hook: Refresh data."""
+        self.sentences_data = self.study_manager.get_imported_sentences()
+        self._update_sentences_view()
+
+    def on_hide(self):
+        """Lifecycle hook."""
+        pass
