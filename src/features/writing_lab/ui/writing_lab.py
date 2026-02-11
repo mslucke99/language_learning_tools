@@ -1,11 +1,144 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, simpledialog
 import json
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header
 from src.features.study_center.ui.dialogs import DeckPickerDialog
 from src.core.localization import tr
+
+class WritingTopicDialog(tk.Toplevel):
+    """Dialog for customizing writing topic generation options."""
+    
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title(tr("dlg_topic_options", "Writing Topic Options"))
+        self.geometry("400x350")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        
+        self.result = None  # {difficulty, scenario_type, topic_category}
+        
+        self.setup_ui()
+        
+        # Center on parent
+        self.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - (400 // 2)
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - (350 // 2)
+        self.geometry(f"+{x}+{y}")
+        
+    def setup_ui(self):
+        # Main frame
+        main_frame = ttk.Frame(self, padding="15")
+        main_frame.pack(fill="both", expand=True)
+        
+        # Difficulty Level
+        ttk.Label(main_frame, text=tr("lbl_difficulty", "Difficulty Level:"), font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
+        
+        self.difficulty_var = tk.StringVar(value="medium")
+        difficulty_frame = ttk.Frame(main_frame)
+        difficulty_frame.pack(anchor="w", padx=20, pady=(0, 15))
+        
+        for difficulty in ["beginner", "intermediate", "advanced"]:
+            ttk.Radiobutton(
+                difficulty_frame,
+                text=difficulty.capitalize(),
+                variable=self.difficulty_var,
+                value=difficulty
+            ).pack(anchor="w", pady=3)
+        
+        # Scenario Type
+        ttk.Label(main_frame, text=tr("lbl_scenario_type", "Writing Type:"), font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
+        
+        self.scenario_var = tk.StringVar()
+        scenario_options = [
+            "Blog post",
+            "Essay",
+            "Email",
+            "Short story",
+            "Review",
+            "Dialogue",
+            "News article",
+            "Any type"
+        ]
+        self.scenario_var.set(scenario_options[7])  # Default to "Any type"
+        
+        scenario_frame = ttk.Frame(main_frame)
+        scenario_frame.pack(anchor="w", fill="x", pady=(0, 15))
+        
+        ttk.Combobox(
+            scenario_frame,
+            textvariable=self.scenario_var,
+            values=scenario_options,
+            state="readonly",
+            width=30
+        ).pack(fill="x")
+        
+        # Topic Category
+        ttk.Label(main_frame, text=tr("lbl_topic_category", "Topic Category:"), font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
+        
+        self.category_var = tk.StringVar()
+        category_options = [
+            "Travel and culture",
+            "Food and cooking",
+            "Technology",
+            "Health and wellness",
+            "Entertainment",
+            "Sports",
+            "Education",
+            "Environment",
+            "Current events",
+            "Personal experiences",
+            "Any topic"
+        ]
+        self.category_var.set(category_options[-1])  # Default to "Any topic"
+        
+        category_frame = ttk.Frame(main_frame)
+        category_frame.pack(anchor="w", fill="x", pady=(0, 20))
+        
+        ttk.Combobox(
+            category_frame,
+            textvariable=self.category_var,
+            values=category_options,
+            state="readonly",
+            width=30
+        ).pack(fill="x")
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill="x", side="bottom")
+        
+        ttk.Button(
+            button_frame,
+            text=tr("btn_generate", "Generate"),
+            command=self._on_generate
+        ).pack(side="left", padx=5)
+        
+        ttk.Button(
+            button_frame,
+            text=tr("btn_cancel", "Cancel"),
+            command=self._on_cancel
+        ).pack(side="right", padx=5)
+    
+    def _on_generate(self):
+        """Return selected options and close dialog."""
+        self.result = {
+            'difficulty': self.difficulty_var.get(),
+            'scenario_type': self.scenario_var.get(),
+            'topic_category': self.category_var.get()
+        }
+        self.destroy()
+    
+    def _on_cancel(self):
+        """Close dialog without generating."""
+        self.result = None
+        self.destroy()
+    
+    def show(self):
+        """Show dialog and return result."""
+        self.wait_window()
+        return self.result
 
 class WritingLabFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, embedded=False):
@@ -27,71 +160,85 @@ class WritingLabFrame(ttk.Frame):
         # TAB 1: COMPOSITION
         self.comp_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.comp_tab, text=tr("tab_current_comp", "✍️ Current Composition"))
-        
         self.setup_composition_tab()
         
-        # TAB 2: HISTORY
+        # TAB 2: FEEDBACK
+        self.feedback_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.feedback_tab, text=tr("tab_feedback", "📊 Feedback"))
+        self.setup_feedback_tab()
+        
+        # TAB 3: HISTORY
         self.history_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.history_tab, text=tr("tab_writing_history", "📜 Writing History"))
-        
         self.setup_history_tab()
 
     def setup_composition_tab(self):
-        # MAIN CONTAINER for Tab 1
-        main_container = ttk.Frame(self.comp_tab)
-        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+        # TOOLBAR (ALWAYS VISIBLE)
+        toolbar = ttk.Frame(self.comp_tab)
+        toolbar.pack(fill="x", padx=10, pady=(10, 5))
         
-        # INPUT SECTION
-        input_frame = ttk.LabelFrame(main_container, text=tr("lbl_comp_input", "✏️ Composition Input"), padding="10")
-        input_frame.pack(fill="both", expand=True, pady=(0, 5))
-        
-        # Topic
-        topic_header = ttk.Frame(input_frame)
-        topic_header.pack(fill="x", pady=(0, 5))
-        ttk.Label(topic_header, text=tr("lbl_topic", "Topic:"), font=("Segoe UI", 10, "bold")).pack(side="left")
-        ttk.Button(topic_header, text=tr("btn_generate_topic", "🎲 Generate Topic"), command=self._generate_writing_topic).pack(side="right")
-        
-        self.topic_text = tk.Text(input_frame, height=3, font=("Segoe UI", 10), wrap="word")
-        self.topic_text.pack(fill="x", pady=(0, 10))
-        self.topic_text.insert("1.0", tr("msg_placeholder_topic", "Type your own topic or click 'Generate Topic'..."))
-        
-        # Writing Area
-        ttk.Label(input_frame, text=tr("lbl_your_comp", "Your Composition:"), font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 5))
-        self.writing_text = tk.Text(input_frame, font=("Segoe UI", 11), wrap="word", undo=True, height=10)
-        self.writing_text.pack(fill="both", expand=True)
-        
-        # ACTION TOOLBAR (PROMINENT PLACEMENT)
-        action_toolbar = ttk.Frame(main_container)
-        action_toolbar.pack(fill="x", pady=10)
-        
-        # Center the grade button with larger size
+        # Action buttons
         self.grade_btn = ttk.Button(
-            action_toolbar, 
+            toolbar, 
             text=tr("btn_grade", "🏆 Grade & Get Feedback"), 
             command=self._grade_writing,
             width=30
         )
-        self.grade_btn.pack(side="left", padx=5, ipady=8) 
+        self.grade_btn.pack(side="left", padx=2, ipady=8) 
         
         ttk.Button(
-            action_toolbar, 
+            toolbar, 
             text=tr("btn_save_draft", "💾 Save Draft"), 
             command=self._save_draft
-        ).pack(side="left", padx=5, ipady=8)
+        ).pack(side="left", padx=2, ipady=8)
 
         ttk.Button(
-            action_toolbar, 
+            toolbar, 
             text=tr("btn_new_clear", "🆕 New / Clear"), 
             command=self._new_composition
-        ).pack(side="right", padx=5, ipady=5)
+        ).pack(side="left", padx=2, ipady=5)
         
-        # FEEDBACK SECTION
+        ttk.Button(
+            toolbar, 
+            text=tr("btn_generate_topic", "🎲 Generate Topic"), 
+            command=self._generate_writing_topic
+        ).pack(side="right", padx=2, ipady=5)
+        
+        # SIDE-BY-SIDE LAYOUT: Topic (Left) + Writing (Right)
+        main_container = ttk.Frame(self.comp_tab)
+        main_container.pack(fill="both", expand=True, padx=10, pady=(5, 10))
+        
+        # LEFT SIDE: TOPIC AREA (Fixed width)
+        topic_frame = ttk.LabelFrame(main_container, text=tr("lbl_topic", "Topic:"), padding="10")
+        topic_frame.pack(side="left", fill="both", padx=(0, 5), ipadx=5)
+        
+        # Set a reasonable width for topic frame
+        topic_frame.configure(width=300)
+        
+        self.topic_text = tk.Text(topic_frame, height=20, font=("Segoe UI", 10), wrap="word")
+        self.topic_text.pack(fill="both", expand=True)
+        self.topic_text.insert("1.0", tr("msg_placeholder_topic", "Type your own topic or click 'Generate Topic'..."))
+        
+        # RIGHT SIDE: WRITING AREA (Expands to fill)
+        writing_frame = ttk.LabelFrame(main_container, text=tr("lbl_your_comp", "Your Composition:"), padding="10")
+        writing_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
+        
+        self.writing_text = tk.Text(writing_frame, font=("Segoe UI", 11), wrap="word", undo=True)
+        self.writing_text.pack(fill="both", expand=True)
+
+    def setup_feedback_tab(self):
+        """Feedback tab - displays AI feedback after grading"""
+        main_container = ttk.Frame(self.feedback_tab)
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Feedback display
         feedback_frame = ttk.LabelFrame(main_container, text=tr("lbl_ai_feedback", "📊 AI Feedback & Suggestions"), padding="10")
-        feedback_frame.pack(fill="both", expand=True, pady=(5, 0))
+        feedback_frame.pack(fill="both", expand=True, pady=(0, 10))
         
-        self.feedback_display = scrolledtext.ScrolledText(feedback_frame, font=("Segoe UI", 10), wrap="word", state="disabled", height=8)
+        self.feedback_display = scrolledtext.ScrolledText(feedback_frame, font=("Segoe UI", 10), wrap="word", state="disabled")
         self.feedback_display.pack(fill="both", expand=True, pady=(0, 10))
         
+        # Suggestions bar
         self.sugg_bar = ttk.Frame(feedback_frame)
         self.sugg_bar.pack(fill="x")
         self.sugg_label = ttk.Label(self.sugg_bar, text=tr("lbl_ai_sugg_none", "AI Suggestions: None"), font=("Segoe UI", 9, "italic"))
@@ -269,9 +416,25 @@ class WritingLabFrame(ttk.Frame):
                 messagebox.showerror(tr("msg_export_error", "Export Error"), str(e))
 
     def _generate_writing_topic(self):
+        # Open topic options dialog
+        dialog = WritingTopicDialog(self.winfo_toplevel())
+        options = dialog.show()
+        
+        if options is None:
+            # User cancelled
+            return
+        
         self.topic_text.delete("1.0", "end")
         self.topic_text.insert("1.0", tr("msg_analyzing", "Generating topic... please wait."))
-        task_id = self.study_manager.queue_generation_task('writing_topic', 0)
+        
+        # Queue task with topic options as kwargs
+        task_id = self.study_manager.queue_generation_task(
+            'writing_topic', 
+            0,
+            difficulty=options['difficulty'],
+            scenario_type=options['scenario_type'],
+            topic_category=options['topic_category']
+        )
         self._check_writing_task(task_id, "topic")
 
     def _grade_writing(self):
@@ -336,6 +499,9 @@ class WritingLabFrame(ttk.Frame):
         else:
             self.sugg_label = ttk.Label(self.sugg_bar, text=tr("msg_sugg_none", "Suggestions: None found."), font=("Segoe UI", 9, "italic"))
             self.sugg_label.pack(side="left")
+        
+        # Switch to Feedback tab to show results
+        self.notebook.select(self.feedback_tab)
 
     def _add_suggestions(self, suggestions, type_name):
         db = self.study_manager.db

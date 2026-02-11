@@ -362,7 +362,7 @@ class StudyManager:
                 elif task_type == 'grade_writing':
                     success, result, suggestions = self.grade_writing(kwargs.get('user_writing'), kwargs.get('topic'))
                 elif task_type == 'writing_topic':
-                    success, result, suggestions = self.generate_writing_topic()
+                    success, result, suggestions = self.generate_writing_topic(**kwargs)
                 elif task_type == 'chat_message':
                     # Fetch current history for context
                     session_id = kwargs.get('session_id')
@@ -453,6 +453,18 @@ class StudyManager:
         """Set the language being studied."""
         self._set_setting('study_language', language)
         self.study_language = language
+
+    def get_study_language_code(self) -> str:
+        """
+        Get the 2-letter ISO code for the current study language.
+        Defaults to 'es' (Spanish) if unknown.
+        """
+        from src.services.text.vocab_calibration import VocabCalibrationService
+        
+        # Create reverse map: 'Korean' -> 'ko', 'Spanish' -> 'es', etc.
+        name_to_code = {v: k for k, v in VocabCalibrationService.DISPLAY_NAMES.items()}
+        
+        return name_to_code.get(self.study_language, 'es')
     
     def set_definition_language_preference(self, prefer_native: bool):
         """Set whether to prefer native language for definitions."""
@@ -1408,14 +1420,6 @@ Any important exceptions or nuances.
             return True, "Sentence added successfully"
         except Exception as e:
             return False, f"Error adding sentence: {str(e)}"
-
-    def delete_word(self, word_id: int) -> bool:
-        """Delete a word and its definitions."""
-        return self.db.delete_imported_content(word_id)
-
-    def delete_sentence(self, sentence_id: int) -> bool:
-        """Delete a sentence and its explanations."""
-        return self.db.delete_imported_content(sentence_id)
             
     # ========== STUDY STATISTICS ==========
     
@@ -1453,15 +1457,28 @@ Any important exceptions or nuances.
         }
     # ========== WRITING COMPOSITION LAB ==========
 
-    def generate_writing_topic(self) -> Tuple[bool, str, Dict]:
+    def generate_writing_topic(self, **kwargs) -> Tuple[bool, str, Dict]:
         """Generate a creative writing topic using AI."""
         if not self.ai_client or not self.ai_client.is_available():
             return False, "AI service is not available", {}
             
         prompt_template = self._get_effective_prompt('writing', 'generate_topic')
+        
+        # Get options from kwargs with defaults
+        difficulty = kwargs.get('difficulty', 'intermediate')
+        scenario_type = kwargs.get('scenario_type', 'Any type')
+        topic_category = kwargs.get('topic_category', 'Any topic')
+        
+        # Format scenario and category for the prompt
+        scenario_str = f"Write as a {scenario_type} format. " if scenario_type != 'Any type' else ""
+        category_str = f"The topic should be about {topic_category}. " if topic_category != 'Any topic' else ""
+        
         prompt = prompt_template.format(
             study_language=self.study_language,
-            native_language=self.native_language
+            native_language=self.native_language,
+            difficulty=difficulty,
+            scenario_type=scenario_str,
+            topic_category=category_str
         )
         
         try:

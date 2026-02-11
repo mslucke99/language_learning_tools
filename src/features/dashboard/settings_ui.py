@@ -5,6 +5,7 @@ import threading
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.ui_utils import setup_standard_header
 from src.features.dashboard.prompt_editor_ui import PromptEditorDialog
+from src.features.dashboard.dictionary_settings_ui import DictionarySettingsFrame
 from src.core.localization import tr, set_locale
 
 # Config dir is now handled largely by the manager but kept for display if needed
@@ -165,6 +166,10 @@ class SettingsUI(ttk.Frame):
         ttk.Label(prompt_tab, text=tr("tip_prompt_editor", "Tip: Use the editor to add specific instructions for your target language."), 
                   font=("Arial", 9, "italic"), foreground="gray", wraplength=500).pack(anchor="w", pady=20)
         
+        # --- TAB 3.5: DICTIONARIES ---
+        dict_tab = DictionarySettingsFrame(self.notebook)
+        self.notebook.add(dict_tab, text=tr("tab_dictionaries", "📚 Dictionaries"))
+
         # --- TAB 4: CLOUD SYNC ---
         sync_tab = ttk.Frame(self.notebook, padding="20")
         self.notebook.add(sync_tab, text=tr("tab_cloud_sync", "☁️ Cloud Sync (Dropbox)"))

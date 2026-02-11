@@ -5,6 +5,7 @@ from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header, bind_mousewheel
 from src.core.ui.related_items_panel import RelatedItemsPanel
 from src.features.study_center.ui.dialogs import ManageCollectionsDialog, MoveItemDialog
+from src.core.localization import tr
 
 class WordsViewFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, db: FlashcardDatabase, embedded=False):

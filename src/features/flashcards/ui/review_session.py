@@ -142,6 +142,7 @@ class ReviewSessionFrame(ttk.Frame):
 
     def submit_rating(self, quality):
         if not self.answer_revealed: return
+        flashcard = self.current_flashcards[self.current_index]
         flashcard.mark_reviewed(quality)
         self.db.update_flashcard(flashcard)
         # Log for statistics

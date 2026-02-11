@@ -12,6 +12,7 @@ from src.features.study_center.ui.grammar_book_view import GrammarBookViewFrame
 from src.features.study_center.ui.quiz_ui import QuizUIFrame
 from src.features.writing_lab.ui.writing_lab import WritingLabFrame
 from src.features.chat.ui.chat_dashboard import ChatDashboardFrame
+from src.features.mining.ui.mining_view import SentenceMiningView
 
 class StudyDashboardFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, db: FlashcardDatabase):
@@ -57,8 +58,12 @@ class StudyDashboardFrame(ttk.Frame):
         # Tab 7: Quiz
         self.quiz_tab = QuizUIFrame(self.notebook, self.controller, self.study_manager, self.db, embedded=True)
         self.notebook.add(self.quiz_tab, text=tr("tab_quiz", "📝 Quiz"))
+
+        # Tab 8: Sentence Mining
+        self.mining_tab = SentenceMiningView(self.notebook, self.db, study_manager=self.study_manager)
+        self.notebook.add(self.mining_tab, text=tr("tab_mining", "⛏️ Mining"))
         
-        self.tabs = [self.stats_tab, self.words_tab, self.sentences_tab, self.grammar_tab, self.writing_tab, self.chat_tab, self.quiz_tab]
+        self.tabs = [self.stats_tab, self.words_tab, self.sentences_tab, self.grammar_tab, self.writing_tab, self.chat_tab, self.quiz_tab, self.mining_tab]
         
         # Bind Tab Shortcuts (Ctrl+1 to Ctrl+6)
         # Note: We bind to the parent because the frame itself might not have focus
@@ -67,8 +72,22 @@ class StudyDashboardFrame(ttk.Frame):
         
         # Actually, global binding checking for visibility is safer for Tkinter
         # but let's try binding to the notebook which should receive events when active
-        for i in range(1, 7):
+        for i in range(1, 9):
             self.controller.root.bind(f"<Control-Key-{i}>", self._make_tab_switcher(i-1), add="+")
+        
+        # Bind tab change event to call on_show on the newly selected tab
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+    def _on_tab_changed(self, event=None):
+        """Called when user switches between tabs within the notebook."""
+        try:
+            current_tab_index = self.notebook.index("current")
+            if 0 <= current_tab_index < len(self.tabs):
+                active_tab = self.tabs[current_tab_index]
+                if hasattr(active_tab, 'on_show'):
+                    active_tab.on_show()
+        except Exception:
+            pass
 
     def _make_tab_switcher(self, index):
         """Factory for tab switch callbacks to capture index."""

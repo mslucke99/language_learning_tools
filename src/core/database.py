@@ -430,6 +430,19 @@ class FlashcardDatabase:
             print("[DB] Migrating sentence_explanations: adding suggestions column")
             cursor.execute("ALTER TABLE sentence_explanations ADD COLUMN suggestions TEXT")
 
+        # 7. Create known_words table for Sentence Mining
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS known_words (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lemma TEXT NOT NULL,
+                language TEXT NOT NULL,
+                source TEXT DEFAULT 'user',   -- 'frequency', 'flashcard', 'user', 'mining'
+                added_at TEXT NOT NULL,
+                UNIQUE(lemma, language)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_known_words_lang ON known_words(language)")
+
         # 6. Create review_logs table for advanced statistics
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS review_logs (
@@ -1275,6 +1288,67 @@ class FlashcardDatabase:
         if mobile_sync:
             cursor.execute("UPDATE sync_metadata SET last_mobile_sync = ? WHERE id = 1", (now,))
         
+        self.conn.commit()
+
+    # ===== KNOWN WORDS METHODS =====
+
+    def add_known_word(self, lemma: str, language: str, source: str = 'user') -> bool:
+        """Mark a single word as known."""
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(
+                "INSERT INTO known_words (lemma, language, source, added_at) VALUES (?, ?, ?, ?)",
+                (lemma.lower().strip(), language, source, datetime.now().isoformat())
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def add_known_words_bulk(self, lemmas: list[str], language: str, source: str = 'user') -> int:
+        """Mark multiple words as known efficiently."""
+        if not lemmas:
+            return 0
+        
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+        data = [(lemma.lower().strip(), language, source, now) for lemma in lemmas]
+        
+        cursor.executemany(
+            "INSERT OR IGNORE INTO known_words (lemma, language, source, added_at) VALUES (?, ?, ?, ?)",
+            data
+        )
+        self.conn.commit()
+        return cursor.rowcount
+
+    def is_word_known(self, lemma: str, language: str) -> bool:
+        """Check if a word is known."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM known_words WHERE lemma = ? AND language = ?",
+            (lemma.lower().strip(), language)
+        )
+        return cursor.fetchone() is not None
+
+    def get_known_word_count(self, language: str) -> int:
+        """Get total known words for a language."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM known_words WHERE language = ?", (language,))
+        return cursor.fetchone()[0]
+
+    def get_all_known_words(self, language: str) -> list[dict]:
+        """Get all known words for a language."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT id, lemma, source, added_at FROM known_words WHERE language = ? ORDER BY lemma",
+            (language,)
+        )
+        return [{"id": r[0], "lemma": r[1], "source": r[2], "added_at": r[3]} for r in cursor.fetchall()]
+
+    def delete_known_word(self, word_id: int):
+        """Remove a word from known words."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM known_words WHERE id = ?", (word_id,))
         self.conn.commit()
 
     def close(self):

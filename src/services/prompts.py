@@ -188,7 +188,8 @@ WRITING_PROMPTS = {
         'name': 'Generate Topic',
         'template': (
             'Suggest a creative writing topic and a short background scenario for a language learner studying {study_language}. '
-            'The topic should be appropriate for their level and encourage the use of diverse vocabulary and grammar. '
+            'The topic should be appropriate for {difficulty} level and encourage the use of diverse vocabulary and grammar. '
+            '{scenario_type}{topic_category}'
             'Provide the response in {native_language}.'
         ),
     },

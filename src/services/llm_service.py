@@ -140,12 +140,16 @@ OllamaThreadedQuery = LLMThreadedQuery
 # Global service instance
 _ai_service: Optional[LLMService] = None
 
-def get_ai_client(provider_type: str = "ollama", config: Dict = None) -> LLMService:
+def get_ai_client(provider_type: Optional[str] = None, config: Optional[Dict] = None) -> LLMService:
     """Get or create the unified AI service instance."""
     global _ai_service
     if _ai_service is None:
-        _ai_service = LLMService(provider_type, config)
-    else:
+        # Initial call, use defaults if not provided
+        p = provider_type or "ollama"
+        c = config or {}
+        _ai_service = LLMService(p, c)
+    elif provider_type is not None:
+        # Update call - only update if a provider_type is explicitly passed
         _ai_service.update_config(provider_type, config)
     return _ai_service
 

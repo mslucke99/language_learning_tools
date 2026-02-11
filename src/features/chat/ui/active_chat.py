@@ -5,6 +5,7 @@ from src.features.study_center.logic.study_manager import StudyManager
 from src.core.ui_utils import setup_standard_header
 from src.core.ui.related_items_panel import add_suggestion_to_storage
 from src.core.localization import tr
+from src.services.dictionary.dictionary_manager import DictionaryEngine
 
 class ActiveChatFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, session_id: int):
@@ -13,6 +14,9 @@ class ActiveChatFrame(ttk.Frame):
         self.study_manager = study_manager
         self.active_session_id = session_id
         
+        self.active_session_id = session_id
+        
+        self.dict_engine = DictionaryEngine() # Initialize dictionary engine
         self.active_tasks = {}
         
         self.setup_ui()
@@ -36,7 +40,11 @@ class ActiveChatFrame(ttk.Frame):
         self.chat_display.tag_config("user", foreground="#007ACC", justify="right")
         self.chat_display.tag_config("assistant", foreground="#2E7D32")
         self.chat_display.tag_config("character", foreground="#8B008B", font=("Segoe UI", 10, "bold"))  # For roleplay characters
+        self.chat_display.tag_config("character", foreground="#8B008B", font=("Segoe UI", 10, "bold"))  # For roleplay characters
         self.chat_display.tag_config("system", foreground="gray", font=("Segoe UI", 9, "italic"))
+        
+        # Context Menu
+        self.chat_display.bind("<Button-3>", self._on_right_click)
         
         input_frame = ttk.Frame(chat_frame)
         input_frame.pack(fill="x")
@@ -235,3 +243,78 @@ class ActiveChatFrame(ttk.Frame):
         self.chat_display.configure(state="normal")
         self.chat_display.insert("end", f"Error: {error}\n\n", "system")
         self.chat_display.configure(state="disabled")
+
+    def _on_right_click(self, event):
+        """Show context menu for definition/analysis."""
+        try:
+            # Check for selection first
+            try:
+                sel_start = self.chat_display.index("sel.first")
+                sel_end = self.chat_display.index("sel.last")
+                selected_text = self.chat_display.get(sel_start, sel_end).strip()
+            except tk.TclError:
+                selected_text = None
+
+            # Get word under cursor
+            index = self.chat_display.index(f"@{event.x},{event.y}")
+            word = self.chat_display.get(f"{index} wordstart", f"{index} wordend").strip()
+            
+            menu = tk.Menu(self, tearoff=0)
+            
+            if selected_text:
+                menu.add_command(label=tr("ctx_analyze_selection", "Analyze Selection"), 
+                               command=lambda: self._analyze_text(selected_text))
+                menu.add_separator()
+            
+            if word:
+                menu.add_command(label=tr("ctx_define_word", "Define '{word}'", word=word), 
+                               command=lambda: self._show_definition(word))
+            
+            if selected_text or word:
+                menu.post(event.x_root, event.y_root)
+                
+        except Exception as e:
+            print(f"Context menu error: {e}")
+
+    def _show_definition(self, word):
+        """Show a popup with dictionary definition."""
+        # Detect language (simplified: assume target language for now, or check char range)
+        #Ideally we pass the study language code.
+        lang_code = "ko" # TODO: specific code or auto-detect. Using 'ko' as default for now implies testing.
+        # Better: get from study_manager
+        lang_map = {"Korean": "ko", "Spanish": "es", "Chinese": "zh", "Japanese": "ja", "English": "en"}
+        target_lang = self.study_manager.study_language
+        lang_code = lang_map.get(target_lang, "en") # Fallback
+        
+        results = self.dict_engine.lookup(word, lang_code)
+        
+        if not results:
+            # Try English as fallback if no result? Or just show "No definition found."
+            messagebox.showinfo(tr("title_def", "Definition"), tr("msg_no_def", "No definition found for '{word}' in {lang}.", word=word, lang=target_lang))
+            return
+            
+        # Format definition
+        text = ""
+        for res in results[:3]: # Show top 3
+            pos = res.get('pos', 'unk')
+            defs = res.get('definitions', [])
+            text += f"[{pos}]\n"
+            for i, d in enumerate(defs, 1):
+                text += f" {i}. {d}\n"
+            text += "\n"
+            
+        messagebox.showinfo(tr("title_def", "Definition: {word}", word=word), text)
+
+    def _analyze_text(self, text):
+        """Show analysis for selected text."""
+        # For now, just show tokens. In future, open proper Analysis View.
+        from src.services.text.tokenizer_service import TokenizerService
+        ts = TokenizerService()
+         # Better: get from study_manager
+        lang_map = {"Korean": "ko", "Spanish": "es", "Chinese": "zh", "Japanese": "ja", "English": "en"}
+        target_lang = self.study_manager.study_language
+        lang_code = lang_map.get(target_lang, "en") 
+        
+        tokens = ts.tokenize(text, lang_code)
+        info = "\n".join([f"{t.text} [{t.pos}]" for t in tokens])
+        messagebox.showinfo("Analysis", info)
