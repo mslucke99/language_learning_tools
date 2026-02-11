@@ -46,31 +46,23 @@ class SentenceMiner:
         # 1. Split text
         sentences_text = self._split_sentences(text)
         
-        # 2. Get known words cache for performance? 
-        # For a long book, querying DB for every token is slow.
-        # But we have `is_word_known` which is a single query.
-        # Better: get ALL known words for this language into a set first.
         known_set = self._load_known_vocabulary(lang_code)
-        
         results = []
         
         for sent_text in sentences_text:
             if not sent_text.strip():
                 continue
                 
-            # Tokenize
             tokens = self.tokenizer.tokenize(sent_text, lang_code)
-            
-            # Filter tokens that are actually words (ignore punctuation in unknown count)
-            # We assume TokenizerService.Token has a POS or we check if lemma is punctuation
-            # For now, strict check: if it has a lemma, we check it.
             
             unknown = []
             for t in tokens:
-                # Skip punctuation/spaces if possible. 
-                # Kiwipiepy/Jieba return punctuation as tokens. 
-                # Simple heuristic: if lemma contains only symbols/punctuation, skip.
+                # 1. Check if it's explicitly punctuation/number
                 if self._is_punctuation(t.lemma):
+                    continue
+                
+                # 2. Language-specific morphology rules
+                if self._should_ignore_token(lang_code, t):
                     continue
                     
                 if t.lemma.lower() not in known_set:
@@ -80,6 +72,32 @@ class SentenceMiner:
             results.append(SentenceResult(sent_text, tokens, unknown, level))
             
         return MiningResult(results)
+
+    def _should_ignore_token(self, lang_code: str, token: Token) -> bool:
+        """
+        Check if a token should be ignored for difficulty/unknown counting.
+        Usually ignores particles, endings, and purely grammatical markers.
+        """
+        if lang_code == "ko":
+            # Kiwipiepy tags:
+            # J* = Particles (Josa)
+            # E* = Endings (Eomi)
+            # X* = Suffixes ( 접사)
+            # S* = Symbols/Punctuation (SF, SP, SS, etc.)
+            if token.pos and (
+                token.pos.startswith('J') or 
+                token.pos.startswith('E') or 
+                token.pos.startswith('X') or
+                token.pos.startswith('S')
+            ):
+                return True
+        
+        elif lang_code == "ja":
+            # For Japanese (MeCab/Sudachi tags typically mapped to universal or specific sets)
+            # Placeholder for future spaCy integration
+            pass
+            
+        return False
 
     def _split_sentences(self, text: str) -> List[str]:
         """
@@ -131,5 +149,6 @@ class SentenceMiner:
         return {w['lemma'].lower() for w in words} # Dict returned by DB
         
     def _is_punctuation(self, text: str) -> bool:
-        """Check if token is purely punctuation."""
-        return not any(c.isalnum() for c in text)
+        """Check if token is purely punctuation or numbers."""
+        # We want to ignore numbers as unknown words too
+        return not any(c.isalpha() for c in text)

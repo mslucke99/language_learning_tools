@@ -62,9 +62,14 @@ class TokenizerService:
             
             # Kiwi result properties: form, tag, start, len
             for t in results:
+                lemma = t.form
+                # Basic lemmatization: If it's a verb/adjective stem, append '다'
+                if t.tag in ['VV', 'VA']:
+                    lemma = t.form + '다'
+                
                 tokens.append(Token(
                     text=t.form,
-                    lemma=t.form,  # Use form as lemma for now
+                    lemma=lemma,
                     pos=t.tag,
                     start=t.start,
                     end=t.start + t.len

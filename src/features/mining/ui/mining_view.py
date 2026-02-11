@@ -6,7 +6,7 @@ from src.core.localization import tr
 from src.core.database import FlashcardDatabase
 from src.services.dictionary.dictionary_manager import DictionaryManager, DictionaryEngine
 from src.services.text.tokenizer_service import TokenizerService
-from src.services.text.sentence_miner import SentenceMiner
+from src.services.text.sentence_miner import SentenceMiner, MiningResult
 from src.services.text.text_importer import TextImporter
 from src.services.text.vocab_calibration import VocabCalibrationService
 from src.features.mining.ui.calibration_dialog import CalibrationDialog
@@ -61,27 +61,33 @@ class SentenceMiningView(ttk.Frame):
         paned = tk.PanedWindow(self, orient="horizontal", sashrelief="raised")
         paned.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # Left: Sentences
-        self.sentence_frame = ttk.Labelframe(paned, text="Sentences")
-        paned.add(self.sentence_frame, minsize=400) # Ensure left side has min width
+        # Left: Notebook for List vs Reading View
+        self.notebook_left = ttk.Notebook(paned)
+        paned.add(self.notebook_left, minsize=400)
         
-        # Filter buttons
-        filter_frame = ttk.Frame(self.sentence_frame)
+        # Tab 1: Mining List
+        self.tab_list = ttk.Frame(self.notebook_left)
+        self.notebook_left.add(self.tab_list, text="Mining List")
+        
+        # Filter buttons (moved to tab_list)
+        filter_frame = ttk.Frame(self.tab_list)
         filter_frame.pack(fill="x", pady=2)
-        self.var_filter = tk.StringVar(value="i+1")
-        ttk.Radiobutton(filter_frame, text="All", variable=self.var_filter, value="all", command=self.filter_sentences).pack(side="left")
-        ttk.Radiobutton(filter_frame, text="i+1 (Optimal)", variable=self.var_filter, value="i+1", command=self.filter_sentences).pack(side="left")
-        ttk.Radiobutton(filter_frame, text="i+0 (Easy)", variable=self.var_filter, value="i+0", command=self.filter_sentences).pack(side="left")
+        self.var_filter = tk.StringVar(value="all") # Default changed to ALL
+        # Updated labels for clarity
+        ttk.Radiobutton(filter_frame, text="All (Full Text)", variable=self.var_filter, value="all", command=self.filter_sentences).pack(side="left", padx=2)
+        ttk.Radiobutton(filter_frame, text="i+1 (1 New Word)", variable=self.var_filter, value="i+1", command=self.filter_sentences).pack(side="left", padx=2)
+        ttk.Radiobutton(filter_frame, text="i+0 (Review Known)", variable=self.var_filter, value="i+0", command=self.filter_sentences).pack(side="left", padx=2)
+        ttk.Radiobutton(filter_frame, text="Challenging (2+ New)", variable=self.var_filter, value="challenging", command=self.filter_sentences).pack(side="left", padx=2)
         
-        self.tree_sentences = ttk.Treeview(self.sentence_frame, columns=("Text", "Level"), show="headings")
+        self.tree_sentences = ttk.Treeview(self.tab_list, columns=("Text", "Level"), show="headings")
         self.tree_sentences.heading("Text", text="Text")
         self.tree_sentences.heading("Level", text="Unknowns")
         self.tree_sentences.column("Text", width=400)
         self.tree_sentences.column("Level", width=80, anchor="center")
-        self.tree_sentences.pack(fill="both", expand=True) # Ensure tree fills frame
+        self.tree_sentences.pack(fill="both", expand=True)
         
         # Scrollbar for tree
-        scrollbar = ttk.Scrollbar(self.sentence_frame, orient="vertical", command=self.tree_sentences.yview)
+        scrollbar = ttk.Scrollbar(self.tab_list, orient="vertical", command=self.tree_sentences.yview)
         self.tree_sentences.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         self.tree_sentences.pack(side="left", fill="both", expand=True)
@@ -92,6 +98,16 @@ class SentenceMiningView(ttk.Frame):
         self.tree_sentences.tag_configure("i+0", foreground="green")
         self.tree_sentences.tag_configure("i+1", foreground="#D4AF37") # Gold
         # self.tree_sentences.tag_configure("i+2", foreground="red") # Default black/red
+
+        # Tab 2: Raw Reading View
+        self.tab_reading = ttk.Frame(self.notebook_left)
+        self.notebook_left.add(self.tab_reading, text="Reading View")
+        
+        self.txt_reading = tk.Text(self.tab_reading, wrap="word", font=("Arial", 11))
+        scroll_reading = ttk.Scrollbar(self.tab_reading, orient="vertical", command=self.txt_reading.yview)
+        self.txt_reading.configure(yscrollcommand=scroll_reading.set)
+        scroll_reading.pack(side="right", fill="y")
+        self.txt_reading.pack(side="left", fill="both", expand=True)
 
         # Right: Unknown Words & Details
         # Use a vertical paned window so details don't get cut off
@@ -175,14 +191,32 @@ class SentenceMiningView(ttk.Frame):
         
         # Analyze in thread
         def run():
-            self.mining_result = self.miner.analyze_text(text, self.lang_code)
-            self.after(0, self.display_results)
+            result = self.miner.analyze_text(text, self.lang_code)
+            self.after(0, lambda: self.display_results(result))
             
         threading.Thread(target=run, daemon=True).start()
 
-    def display_results(self):
+    def display_results(self, result: MiningResult):
+        self.mining_result = result
         self.filter_sentences()
         self.refresh_unknown_panel()
+        self.populate_reading_view()
+        
+    def populate_reading_view(self):
+        """Show full text in reading view with sentence segmentation."""
+        self.txt_reading.config(state="normal")
+        self.txt_reading.delete("1.0", "end")
+        
+        if not self.mining_result:
+            self.txt_reading.config(state="disabled")
+            return
+            
+        for s in self.mining_result.sentences:
+            # Insert text
+            # We could tag unknown words here too, but for now just plain text
+            self.txt_reading.insert("end", s.text + "\n")
+            
+        self.txt_reading.config(state="disabled")
 
     def filter_sentences(self):
         if not hasattr(self, 'mining_result'): return
@@ -207,8 +241,28 @@ class SentenceMiningView(ttk.Frame):
             s for s in self.mining_result.sentences
             if (filter_mode == "all") or
                (filter_mode == "i+1" and s.level == 1) or
-               (filter_mode == "i+0" and s.level == 0)
+               (filter_mode == "i+0" and s.level == 0) or
+               (filter_mode == "challenging" and s.level >= 2)
         ]
+
+    def update_mining_levels(self):
+        """Recalculate unknown counts for all sentences after database change."""
+        if not hasattr(self, 'mining_result'): return
+        
+        known_set = self.miner._load_known_vocabulary(self.lang_code)
+        
+        for s in self.mining_result.sentences:
+            new_unknown = []
+            for t in s.tokens:
+                if self.miner._is_punctuation(t.lemma):
+                    continue
+                if t.lemma.lower() not in known_set:
+                    new_unknown.append(t)
+            
+            s.unknown_words = new_unknown
+            s.level = len(new_unknown)
+            
+        self.filter_sentences()
 
     def refresh_unknown_panel(self):
         if not hasattr(self, 'mining_result'): return
