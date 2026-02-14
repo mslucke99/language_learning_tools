@@ -1,23 +1,54 @@
 import re
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional, TYPE_CHECKING
 from src.core.database import FlashcardDatabase
 from src.services.text.tokenizer_service import TokenizerService, Token
 from src.services.dictionary.dictionary_manager import DictionaryEngine
+from src.services.text.grammar_extractor import GrammarExtractor
+
+if TYPE_CHECKING:
+    from src.services.text.sentence_difficulty import SentenceDifficultyScorer
 
 class SentenceResult:
-    def __init__(self, text: str, tokens: List[Token], unknown_words: List[Token], level: int):
+    def __init__(
+        self,
+        text: str,
+        tokens: List[Token],
+        unknown_words: List[Token],
+        level: int,
+        grammar_patterns: List[str] = None,
+        *,
+        difficulty_score: Optional[float] = None,
+        difficulty_confidence: Optional[float] = None,
+        category: Optional[str] = None,
+        bottleneck_word: Optional[str] = None,
+    ):
         self.text = text
         self.tokens = tokens
         self.unknown_words = unknown_words
         self.level = level  # 0 = i+0 (all known), 1 = i+1, etc.
-        
+        self.grammar_patterns = grammar_patterns if grammar_patterns else []
+        self.difficulty_score = difficulty_score
+        self.difficulty_confidence = difficulty_confidence
+        self.category = category
+        self.bottleneck_word = bottleneck_word
+
     def to_dict(self):
-        return {
+        d = {
             "text": self.text,
             "tokens": [t.__dict__ for t in self.tokens],
             "unknown_words": [t.__dict__ for t in self.unknown_words],
-            "level": self.level
+            "level": self.level,
+            "grammar_patterns": self.grammar_patterns,
         }
+        if self.difficulty_score is not None:
+            d["difficulty_score"] = self.difficulty_score
+        if self.difficulty_confidence is not None:
+            d["difficulty_confidence"] = self.difficulty_confidence
+        if self.category is not None:
+            d["category"] = self.category
+        if self.bottleneck_word is not None:
+            d["bottleneck_word"] = self.bottleneck_word
+        return d
 
 class MiningResult:
     def __init__(self, sentences: List[SentenceResult]):
@@ -35,42 +66,62 @@ class MiningResult:
                 self.all_unknown_words[t.lemma] = t
 
 class SentenceMiner:
-    def __init__(self, db: FlashcardDatabase, tokenizer: TokenizerService):
+    def __init__(
+        self,
+        db: FlashcardDatabase,
+        tokenizer: TokenizerService,
+        difficulty_scorer: Optional["SentenceDifficultyScorer"] = None,
+    ):
         self.db = db
         self.tokenizer = tokenizer
-        
+        self.grammar_extractor = GrammarExtractor()
+        self.difficulty_scorer = difficulty_scorer
+
     def analyze_text(self, text: str, lang_code: str) -> MiningResult:
         """
         Split text into sentences and classify each by difficulty level.
+        If difficulty_scorer is set, each SentenceResult also gets difficulty_score, category, etc.
         """
         # 1. Split text
         sentences_text = self._split_sentences(text)
-        
+
         known_set = self._load_known_vocabulary(lang_code)
         results = []
-        
+
         for sent_text in sentences_text:
             if not sent_text.strip():
                 continue
-                
+
             tokens = self.tokenizer.tokenize(sent_text, lang_code)
-            
+
             unknown = []
             for t in tokens:
                 # 1. Check if it's explicitly punctuation/number
                 if self._is_punctuation(t.lemma):
                     continue
-                
+
                 # 2. Language-specific morphology rules
                 if self._should_ignore_token(lang_code, t):
                     continue
-                    
+
                 if t.lemma.lower() not in known_set:
                     unknown.append(t)
-            
+
+            # 3. Grammar patterns
+            grammar_patterns = self.grammar_extractor.extract(tokens, lang_code)
+
             level = len(unknown)
-            results.append(SentenceResult(sent_text, tokens, unknown, level))
-            
+            result = SentenceResult(sent_text, tokens, unknown, level, grammar_patterns)
+
+            if self.difficulty_scorer:
+                score_result = self.difficulty_scorer.score_sentence(sent_text, lang_code)
+                result.difficulty_score = score_result.difficulty_score
+                result.difficulty_confidence = score_result.confidence
+                result.category = score_result.difficulty_category
+                result.bottleneck_word = score_result.bottleneck_word
+
+            results.append(result)
+
         return MiningResult(results)
 
     def _should_ignore_token(self, lang_code: str, token: Token) -> bool:

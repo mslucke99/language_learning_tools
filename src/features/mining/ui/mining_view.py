@@ -8,6 +8,13 @@ from src.services.dictionary.dictionary_manager import DictionaryManager, Dictio
 from src.services.text.tokenizer_service import TokenizerService
 from src.services.text.sentence_miner import SentenceMiner, MiningResult
 from src.services.text.text_importer import TextImporter
+from src.services.text.sentence_difficulty import (
+    SentenceDifficultyScorer,
+    UserProfile,
+    make_tokenizer_adapter_from_tokenizer_service,
+    make_recall_provider_from_db,
+)
+from src.services.text.difficulty_resources import load_resource_bundle
 from src.services.text.vocab_calibration import VocabCalibrationService
 from src.features.mining.ui.calibration_dialog import CalibrationDialog
 from src.features.mining.ui.known_words_view import KnownWordsView
@@ -28,8 +35,9 @@ class SentenceMiningView(ttk.Frame):
             
         self.tokenizer = TokenizerService()
         self.dict_engine = DictionaryEngine()
-        self.miner = SentenceMiner(db, self.tokenizer)
-        
+        self.miner = SentenceMiner(db, self.tokenizer, difficulty_scorer=None)
+        self._difficulty_scorer_cache = {}  # lang_code -> scorer (optional, for reuse)
+
         self.setup_ui()
         
     def on_show(self):
@@ -79,11 +87,17 @@ class SentenceMiningView(ttk.Frame):
         ttk.Radiobutton(filter_frame, text="i+0 (Review Known)", variable=self.var_filter, value="i+0", command=self.filter_sentences).pack(side="left", padx=2)
         ttk.Radiobutton(filter_frame, text="Challenging (2+ New)", variable=self.var_filter, value="challenging", command=self.filter_sentences).pack(side="left", padx=2)
         
-        self.tree_sentences = ttk.Treeview(self.tab_list, columns=("Text", "Level"), show="headings")
+        self.tree_sentences = ttk.Treeview(
+            self.tab_list, columns=("Text", "Level", "Difficulty", "Category"), show="headings"
+        )
         self.tree_sentences.heading("Text", text="Text")
         self.tree_sentences.heading("Level", text="Unknowns")
-        self.tree_sentences.column("Text", width=400)
-        self.tree_sentences.column("Level", width=80, anchor="center")
+        self.tree_sentences.heading("Difficulty", text="Difficulty")
+        self.tree_sentences.heading("Category", text="Category")
+        self.tree_sentences.column("Text", width=320)
+        self.tree_sentences.column("Level", width=60, anchor="center")
+        self.tree_sentences.column("Difficulty", width=56, anchor="center")
+        self.tree_sentences.column("Category", width=90, anchor="center")
         self.tree_sentences.pack(fill="both", expand=True)
         
         # Scrollbar for tree
@@ -186,14 +200,39 @@ class SentenceMiningView(ttk.Frame):
         except:
             messagebox.showerror("Error", "Clipboard is empty")
 
+    def _get_difficulty_scorer(self):
+        """Build or reuse a SentenceDifficultyScorer for current language."""
+        lang = self.lang_code or "en"
+        if lang in self._difficulty_scorer_cache:
+            return self._difficulty_scorer_cache[lang]
+        try:
+            db_path = getattr(self.db, "db_path", "")
+            resources = load_resource_bundle(
+                lang, db_path, load_frequency=True, load_graded=False, load_quantiles=False
+            )
+            profile = UserProfile(claimed_level="B1", language=lang)
+            adapter = make_tokenizer_adapter_from_tokenizer_service(self.tokenizer)
+            recall_provider = make_recall_provider_from_db(self.db)
+            scorer = SentenceDifficultyScorer(
+                tokenizer_adapter=adapter,
+                resources=resources,
+                user_profile=profile,
+                recall_provider=recall_provider,
+            )
+            self._difficulty_scorer_cache[lang] = scorer
+            return scorer
+        except Exception:
+            return None
+
     def process_text(self, text):
         if not text.strip(): return
-        
-        # Analyze in thread
+
+        self.miner.difficulty_scorer = self._get_difficulty_scorer()
+
         def run():
             result = self.miner.analyze_text(text, self.lang_code)
             self.after(0, lambda: self.display_results(result))
-            
+
         threading.Thread(target=run, daemon=True).start()
 
     def display_results(self, result: MiningResult):
@@ -227,9 +266,15 @@ class SentenceMiningView(ttk.Frame):
         for s in self.mining_result.sentences:
             if filter_mode == "i+1" and s.level != 1: continue
             if filter_mode == "i+0" and s.level != 0: continue
-            
+
             tag = "i+0" if s.level == 0 else "i+1" if s.level == 1 else "i+2"
-            self.tree_sentences.insert("", "end", values=(s.text, f"{s.level} unknown"), tags=(tag,))
+            diff_str = f"{s.difficulty_score:.2f}" if s.difficulty_score is not None else "-"
+            cat_str = (s.category or "-").replace("_", " ")
+            self.tree_sentences.insert(
+                "", "end",
+                values=(s.text, f"{s.level} unknown", diff_str, cat_str),
+                tags=(tag,),
+            )
             
             # Store sentence obj reference? 
             # Treeview doesn't store objects easy. 
@@ -293,10 +338,21 @@ class SentenceMiningView(ttk.Frame):
             self.lbl_detail.config(state="normal")
             self.lbl_detail.delete("1.0", "end")
             self.lbl_detail.insert("end", s.text + "\n\n")
-            
+
+            if s.difficulty_score is not None:
+                self.lbl_detail.insert("end", f"Difficulty: {s.difficulty_score:.2f} ({s.category or '-'})\n")
+                if s.difficulty_confidence is not None:
+                    self.lbl_detail.insert("end", f"Confidence: {s.difficulty_confidence:.2f}\n")
+                if s.bottleneck_word:
+                    self.lbl_detail.insert("end", f"Bottleneck word: {s.bottleneck_word}\n")
+                self.lbl_detail.insert("end", "\n")
+
             if s.unknown_words:
-                self.lbl_detail.insert("end", "Unknown: " + ", ".join([t.lemma for t in s.unknown_words]))
-                
+                self.lbl_detail.insert("end", "Unknown: " + ", ".join([t.lemma for t in s.unknown_words]) + "\n")
+
+            if s.grammar_patterns:
+                self.lbl_detail.insert("end", "Grammar: " + ", ".join(s.grammar_patterns) + "\n")
+
             self.lbl_detail.config(state="disabled")
             self.btn_add_sentence.config(state="normal" if s.level > 0 else "disabled")
 

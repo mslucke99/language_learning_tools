@@ -1345,6 +1345,14 @@ class FlashcardDatabase:
         )
         return [{"id": r[0], "lemma": r[1], "source": r[2], "added_at": r[3]} for r in cursor.fetchall()]
 
+    def get_user_recall_data(self, language: str) -> Dict[str, float]:
+        """
+        Return lemma -> recall probability (0-1) for sentence difficulty scoring.
+        Phase 1/Option A: known_words -> 1.0. Phase 2 can add flashcard-derived recall.
+        """
+        words = self.get_all_known_words(language)
+        return {w["lemma"].lower(): 1.0 for w in words}
+
     def delete_known_word(self, word_id: int):
         """Remove a word from known words."""
         cursor = self.conn.cursor()
