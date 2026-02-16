@@ -321,7 +321,7 @@ class WordsViewFrame(ttk.Frame):
                  self._handle_completed_task(task_id, status)
                  
         for task_id in completed_tasks:
-            del self.active_tasks[task_id]
+            self.active_tasks.pop(task_id, None)
             
         self.after(1000, self._check_queue_status)
 

@@ -17,6 +17,7 @@ class ScenarioEditorDialog(tk.Toplevel):
         self.resizable(True, True)
         
         self.characters = []  # List of character dicts
+        self.active_task_id = None
         
         self.setup_ui()
         if scenario_id:
@@ -48,6 +49,31 @@ class ScenarioEditorDialog(tk.Toplevel):
         
         canvas.pack(side="left", fill="both", expand=True, padx=10, pady=5)
         scrollbar.pack(side="right", fill="y")
+        
+        # --- Auto-generate Options ---
+        gen_frame = ttk.LabelFrame(scrollable_frame, text=tr("btn_auto_generate", "✨ Auto-generate"), padding=10)
+        gen_frame.pack(fill="x", pady=(10, 5))
+        
+        ttk.Label(gen_frame, text=tr("lbl_scenario_type", "Scenario Type:")).pack(side="left", padx=(0, 5))
+        
+        self.scenario_types = [
+            (tr("opt_scenario_everyday", "Everyday Life"), "Everyday Life"),
+            (tr("opt_scenario_work", "Work & Professional"), "Work & Professional"),
+            (tr("opt_scenario_fantasy", "Fantasy World"), "Fantasy World"),
+            (tr("opt_scenario_history", "Historical Situation"), "Historical Situation"),
+            (tr("opt_scenario_travel", "Travel & Tourism"), "Travel & Tourism"),
+            (tr("opt_scenario_mystery", "Mystery & Crime"), "Mystery & Crime")
+        ]
+        
+        self.type_var = tk.StringVar(value=self.scenario_types[0][0])
+        self.type_combo = ttk.Combobox(gen_frame, textvariable=self.type_var, values=[t[0] for t in self.scenario_types], state="readonly", width=30)
+        self.type_combo.pack(side="left", padx=5)
+        
+        self.gen_btn = ttk.Button(gen_frame, text=tr("btn_generate", "Generate"), command=self._on_auto_generate)
+        self.gen_btn.pack(side="left", padx=5)
+        
+        self.gen_status_label = ttk.Label(gen_frame, text="", font=("Segoe UI", 9, "italic"))
+        self.gen_status_label.pack(side="left", padx=10)
         
         # --- Name ---
         ttk.Label(scrollable_frame, text=tr("lbl_scenario_name", "Scenario Name:"), font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(10, 2))
@@ -226,6 +252,80 @@ class ScenarioEditorDialog(tk.Toplevel):
     def cancel(self):
         self.result = None
         self.destroy()
+
+    def _on_auto_generate(self):
+        """Trigger AI scenario generation."""
+        if not self.study_manager.ai_available():
+            messagebox.showwarning(tr("error_title", "AI Unavailable"), tr("msg_ai_unavailable", "AI service is not available. Check your settings."))
+            return
+            
+        # Get the internal type name
+        display_type = self.type_var.get()
+        scenario_type = next((t[1] for t in self.scenario_types if t[0] == display_type), "Everyday Life")
+        
+        self.gen_btn.config(state="disabled")
+        self.gen_status_label.config(text=tr("msg_generating_scenario", "Generating scenario... please wait."), foreground="blue")
+        
+        self.active_task_id = self.study_manager.queue_generation_task(
+            'generate_roleplay_scenario',
+            0,
+            scenario_type=scenario_type
+        )
+        self._poll_generation()
+
+    def _poll_generation(self):
+        """Poll for generation task completion."""
+        if not self.active_task_id:
+            return
+            
+        status = self.study_manager.get_task_status(self.active_task_id)
+        if status['status'] == 'completed':
+            self._handle_generation_success(status['result'])
+        elif status['status'] == 'failed':
+            self._handle_generation_failure(status.get('error', 'Unknown error'))
+        else:
+            # Continue polling
+            self.after(500, self._poll_generation)
+
+    def _handle_generation_success(self, data):
+        """Populate fields with generated data."""
+        self.gen_btn.config(state="normal")
+        self.gen_status_label.config(text=tr("msg_success", "Success"), foreground="green")
+        
+        # Clear existing
+        self.name_entry.delete(0, tk.END)
+        self.desc_text.delete("1.0", tk.END)
+        self.situation_text.delete("1.0", tk.END)
+        self.user_role_entry.delete(0, tk.END)
+        self.characters = []
+        
+        # Insert new
+        self.name_entry.insert(0, data.get('name', ''))
+        self.desc_text.insert("1.0", data.get('description', ''))
+        self.situation_text.insert("1.0", data.get('situation', ''))
+        self.user_role_entry.insert(0, data.get('user_role', ''))
+        
+        # Add characters
+        char_list = data.get('characters', [])
+        for char in char_list:
+            if isinstance(char, dict) and char.get('name') and char.get('role'):
+                self.characters.append({
+                    'name': char['name'],
+                    'role': char['role'],
+                    'personality': char.get('personality', '')
+                })
+        
+        self._update_character_list()
+        self.active_task_id = None
+        
+        messagebox.showinfo(tr("msg_success", "Success"), tr("msg_scenario_generated", "Scenario generated and populated!"))
+
+    def _handle_generation_failure(self, error):
+        """Handle generation error."""
+        self.gen_btn.config(state="normal")
+        self.gen_status_label.config(text=tr("error_title", "Error"), foreground="red")
+        self.active_task_id = None
+        messagebox.showerror(tr("error_title", "Generation Failed"), f"{tr('msg_error_topic', 'Error generating topic')}: {error}")
 
 
 class ScenarioSelectorDialog(tk.Toplevel):

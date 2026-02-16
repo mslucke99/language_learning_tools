@@ -15,12 +15,16 @@ WORD_PROMPTS = {
             '1. **Part of Speech**: Noun\n'
             '2. **Definition**: Detailed definition here.\n'
             '3. **Register**: Neutral/Polite.\n'
-            '4. **Memory Hook**: A mnemonic aid.'
+            '4. **Memory Hook**: A mnemonic aid.\n\n'
+            '**Flashcard Suggestion**:\n'
+            '<flashcard word="{word}">A concise, flashcard-appropriate definition.</flashcard>'
         ),
         'study_template': (
             'Explain the word "{word}" in {study_language} using very simple language for a beginner. '
             'Focus on the most common usage. If the language has formality levels (like Korean), '
-            'use a standard polite register.'
+            'use a standard polite register.\n\n'
+            '**Flashcard Suggestion**:\n'
+            '<flashcard word="{word}">A simple definition in {study_language}.</flashcard>'
         ),
     },
     'explanation': {
@@ -32,11 +36,15 @@ WORD_PROMPTS = {
             '**Example Output:**\n'
             '**Nuance**: Explain the subtle feeling of the word.\n'
             '**Synonyms**: Compare with similar words (e.g., "This implies X, whereas Y implies Z").\n'
-            '**Usage**: Suitable for formal writing but not casual speech.'
+            '**Usage**: Suitable for formal writing but not casual speech.\n\n'
+            '**Flashcard Suggestion**:\n'
+            '<flashcard word="{word}">A concise, flashcard-appropriate definition.</flashcard>'
         ),
         'study_template': (
             'Describe how to use "{word}" in {study_language} using simple, clear sentences. '
-            'Show, don\'t just tell, by providing a mini-context where this word is the natural choice.'
+            'Show, don\'t just tell, by providing a mini-context where this word is the natural choice.\n\n'
+            '**Flashcard Suggestion**:\n'
+            '<flashcard word="{word}">A simple definition in {study_language}.</flashcard>'
         ),
     },
     'examples': {
@@ -334,6 +342,29 @@ ROLEPLAY_PROMPTS = {
             'Target Language: {study_language}\n'
             'Maintain consistent character personalities and remember the conversation history for consistency.\n'
             'Begin the roleplay or continue naturally.'
+        ),
+    },
+    'generate_scenario': {
+        'name': 'Generate Scenario',
+        'template': (
+            'Generate a creative language learning role-play scenario for studying {study_language}. '
+            'The scenario type is: {scenario_type}.\n\n'
+            'Provide the response strictly in JSON format with the following structure:\n'
+            '{{\n'
+            '  "name": "A creative name for the scenario",\n'
+            '  "description": "A short summary of what happens",\n'
+            '  "situation": "Detailed context and setup for the interaction",\n'
+            '  "user_role": "Who the user is playing in this scenario",\n'
+            '  "characters": [\n'
+            '    {{\n'
+            '      "name": "Character Name",\n'
+            '      "role": "Character Role",\n'
+            '      "personality": "Description of personality and background"\n'
+            '    }}\n'
+            '  ]\n'
+            '}}\n\n'
+            'The scenario should be tailored for a student whose native language is {native_language}. '
+            'Include 1 or 2 interesting AI characters.'
         ),
     }
 }

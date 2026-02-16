@@ -15,6 +15,7 @@ from src.services.text.sentence_difficulty import (
     make_recall_provider_from_db,
 )
 from src.services.text.difficulty_resources import load_resource_bundle
+from src.services.text.difficulty_categories import CATEGORIES as DIFF_CATEGORIES
 from src.services.text.vocab_calibration import VocabCalibrationService
 from src.features.mining.ui.calibration_dialog import CalibrationDialog
 from src.features.mining.ui.known_words_view import KnownWordsView
@@ -37,6 +38,9 @@ class SentenceMiningView(ttk.Frame):
         self.dict_engine = DictionaryEngine()
         self.miner = SentenceMiner(db, self.tokenizer, difficulty_scorer=None)
         self._difficulty_scorer_cache = {}  # lang_code -> scorer (optional, for reuse)
+        self.current_view_sentences = []
+        self.selected_sentence = None
+        self.mining_result = None
 
         self.setup_ui()
         
@@ -59,6 +63,10 @@ class SentenceMiningView(ttk.Frame):
         top_bar = ttk.Frame(self, padding=5)
         top_bar.pack(fill="x")
         
+        self.var_filter = tk.StringVar(value="all")
+        self.target_cat = tk.StringVar(value="Any")
+        self.sort_mode = tk.StringVar(value="Order")
+        
         ttk.Button(top_bar, text="Import File...", command=self.import_file).pack(side="left", padx=5)
         ttk.Button(top_bar, text="Paste Clipboard", command=self.import_clipboard).pack(side="left", padx=5)
         
@@ -80,12 +88,19 @@ class SentenceMiningView(ttk.Frame):
         # Filter buttons (moved to tab_list)
         filter_frame = ttk.Frame(self.tab_list)
         filter_frame.pack(fill="x", pady=2)
-        self.var_filter = tk.StringVar(value="all") # Default changed to ALL
-        # Updated labels for clarity
-        ttk.Radiobutton(filter_frame, text="All (Full Text)", variable=self.var_filter, value="all", command=self.filter_sentences).pack(side="left", padx=2)
-        ttk.Radiobutton(filter_frame, text="i+1 (1 New Word)", variable=self.var_filter, value="i+1", command=self.filter_sentences).pack(side="left", padx=2)
-        ttk.Radiobutton(filter_frame, text="i+0 (Review Known)", variable=self.var_filter, value="i+0", command=self.filter_sentences).pack(side="left", padx=2)
-        ttk.Radiobutton(filter_frame, text="Challenging (2+ New)", variable=self.var_filter, value="challenging", command=self.filter_sentences).pack(side="left", padx=2)
+        ttk.Radiobutton(filter_frame, text="All", variable=self.var_filter, value="all", command=self.filter_sentences).pack(side="left", padx=2)
+        ttk.Radiobutton(filter_frame, text="i+0", variable=self.var_filter, value="i+0", command=self.filter_sentences).pack(side="left", padx=2)
+        ttk.Radiobutton(filter_frame, text="i+1 (Target)", variable=self.var_filter, value="i+1", command=self.filter_sentences).pack(side="left", padx=2)
+
+        ttk.Label(filter_frame, text="Category:").pack(side="left", padx=(10, 2))
+        self.combo_category = ttk.Combobox(filter_frame, textvariable=self.target_cat, values=["Any", "Mastered", "Review", "Sweet Spot", "Stretch", "Too Hard"], width=12, state="readonly")
+        self.combo_category.pack(side="left", padx=2)
+        self.combo_category.bind("<<ComboboxSelected>>", lambda e: self.filter_sentences())
+
+        ttk.Label(filter_frame, text="Sort:").pack(side="left", padx=(10, 2))
+        self.combo_sort = ttk.Combobox(filter_frame, textvariable=self.sort_mode, values=["Order", "Difficulty (Low)", "Difficulty (High)", "Unknowns"], width=15, state="readonly")
+        self.combo_sort.pack(side="left", padx=2)
+        self.combo_sort.bind("<<ComboboxSelected>>", lambda e: self.filter_sentences())
         
         self.tree_sentences = ttk.Treeview(
             self.tab_list, columns=("Text", "Level", "Difficulty", "Category"), show="headings"
@@ -99,6 +114,10 @@ class SentenceMiningView(ttk.Frame):
         self.tree_sentences.column("Difficulty", width=56, anchor="center")
         self.tree_sentences.column("Category", width=90, anchor="center")
         self.tree_sentences.pack(fill="both", expand=True)
+        
+        # Configure tags for colors
+        for cat_key, meta in DIFF_CATEGORIES.items():
+            self.tree_sentences.tag_configure(cat_key, foreground=meta["color"])
         
         # Scrollbar for tree
         scrollbar = ttk.Scrollbar(self.tab_list, orient="vertical", command=self.tree_sentences.yview)
@@ -258,37 +277,52 @@ class SentenceMiningView(ttk.Frame):
         self.txt_reading.config(state="disabled")
 
     def filter_sentences(self):
-        if not hasattr(self, 'mining_result'): return
+        if not self.mining_result: return
         
         filter_mode = self.var_filter.get()
-        self.tree_sentences.delete(*self.tree_sentences.get_children())
-        
+        target_cat = self.target_cat.get()
+        sort_mode = self.sort_mode.get()
+
+        # 1. Filter
+        filtered = []
         for s in self.mining_result.sentences:
+            # i+N Filter
             if filter_mode == "i+1" and s.level != 1: continue
             if filter_mode == "i+0" and s.level != 0: continue
+            if filter_mode == "challenging" and s.level < 2: continue
+            
+            # Category Filter
+            if target_cat != "Any":
+                cat_display = DIFF_CATEGORIES.get(s.category, {}).get("display", "")
+                if target_cat != cat_display:
+                    continue
+            
+            filtered.append(s)
 
-            tag = "i+0" if s.level == 0 else "i+1" if s.level == 1 else "i+2"
+        # 2. Sort
+        if sort_mode == "Difficulty (Low)":
+            filtered.sort(key=lambda s: s.difficulty_score or 1.0)
+        elif sort_mode == "Difficulty (High)":
+            filtered.sort(key=lambda s: s.difficulty_score or 0.0, reverse=True)
+        elif sort_mode == "Unknowns":
+            filtered.sort(key=lambda s: s.level)
+        
+        # 3. Display
+        self.tree_sentences.delete(*self.tree_sentences.get_children())
+        self.current_view_sentences = filtered
+
+        for s in filtered:
             diff_str = f"{s.difficulty_score:.2f}" if s.difficulty_score is not None else "-"
-            cat_str = (s.category or "-").replace("_", " ")
+            cat_key = s.category
+            cat_str = "-"
+            if cat_key in DIFF_CATEGORIES:
+                cat_str = DIFF_CATEGORIES[cat_key]["display"]
+            
             self.tree_sentences.insert(
                 "", "end",
                 values=(s.text, f"{s.level} unknown", diff_str, cat_str),
-                tags=(tag,),
+                tags=(cat_key,) if cat_key in DIFF_CATEGORIES else (),
             )
-            
-            # Store sentence obj reference? 
-            # Treeview doesn't store objects easy. 
-            # Ideally we have a mapping list matching tree index, or map ID.
-            # Simple hack: find sentence by text (not unique).
-            # Better: rebuild list `self.current_view_sentences` matches tree.
-
-        self.current_view_sentences = [
-            s for s in self.mining_result.sentences
-            if (filter_mode == "all") or
-               (filter_mode == "i+1" and s.level == 1) or
-               (filter_mode == "i+0" and s.level == 0) or
-               (filter_mode == "challenging" and s.level >= 2)
-        ]
 
     def update_mining_levels(self):
         """Recalculate unknown counts for all sentences after database change."""
@@ -340,7 +374,12 @@ class SentenceMiningView(ttk.Frame):
             self.lbl_detail.insert("end", s.text + "\n\n")
 
             if s.difficulty_score is not None:
-                self.lbl_detail.insert("end", f"Difficulty: {s.difficulty_score:.2f} ({s.category or '-'})\n")
+                cat_meta = DIFF_CATEGORIES.get(s.category, {})
+                display_name = cat_meta.get("display", s.category or "-")
+                self.lbl_detail.insert("end", f"Difficulty: {s.difficulty_score:.2f} ({display_name})\n")
+                if "desc" in cat_meta:
+                    self.lbl_detail.insert("end", f"Info: {cat_meta['desc']}\n")
+                
                 if s.difficulty_confidence is not None:
                     self.lbl_detail.insert("end", f"Confidence: {s.difficulty_confidence:.2f}\n")
                 if s.bottleneck_word:

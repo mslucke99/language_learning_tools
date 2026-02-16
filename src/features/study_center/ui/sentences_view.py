@@ -347,7 +347,7 @@ class SentencesViewFrame(ttk.Frame):
                  elif status['status'] == 'failed':
                       messagebox.showerror("Error", status.get("error"))
                        
-        for t in completed: del self.active_tasks[t]
+        for t in completed: self.active_tasks.pop(t, None)
         self.after(1000, self._check_queue_status)
                       
     def _add_manual_sentence_dialog(self):

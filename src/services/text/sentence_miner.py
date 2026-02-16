@@ -113,14 +113,19 @@ class SentenceMiner:
             level = len(unknown)
             result = SentenceResult(sent_text, tokens, unknown, level, grammar_patterns)
 
-            if self.difficulty_scorer:
-                score_result = self.difficulty_scorer.score_sentence(sent_text, lang_code)
-                result.difficulty_score = score_result.difficulty_score
-                result.difficulty_confidence = score_result.confidence
-                result.category = score_result.difficulty_category
-                result.bottleneck_word = score_result.bottleneck_word
-
             results.append(result)
+
+        # 4. Batch Difficulty Scoring (for performance)
+        if self.difficulty_scorer:
+            sentence_texts = [r.text for r in results]
+            score_results = self.difficulty_scorer.score_batch(sentence_texts, lang_code)
+            
+            for i, res in enumerate(results):
+                sr = score_results[i]
+                res.difficulty_score = sr.difficulty_score
+                res.difficulty_confidence = sr.confidence
+                res.category = sr.difficulty_category
+                res.bottleneck_word = sr.bottleneck_word
 
         return MiningResult(results)
 

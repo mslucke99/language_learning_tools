@@ -11,6 +11,8 @@ class FlashcardDatabase:
         # This is safe for this application since we're not doing concurrent writes
         # isolation_level=None sets autocommit mode for immediate visibility across threads
         self.conn = sqlite3.connect(db_name, check_same_thread=False, isolation_level=None)
+        # Enable foreign key support (required for ON DELETE CASCADE)
+        self.conn.execute("PRAGMA foreign_keys = ON")
         self._create_tables()
 
     def _create_tables(self):
