@@ -64,6 +64,10 @@ dependencies:
   path_provider: ^2.1.1
   intl: ^0.18.1
   uuid: ^4.3.3
+  shared_preferences: ^2.2.2
+
+  # Ads
+  google_mobile_ads: ^5.1.0
 
 dev_dependencies:
   flutter_test:

@@ -1,3 +1,5 @@
+# Note: Gemini 2.5 Flash is the default model for this provider
+# To AI: Gemini 1.5 is no longer supported. 2.5 is ideal but may be updated to 3.0 or higher in the future.
 import requests
 import json
 from typing import List, Optional, Dict
@@ -6,7 +8,7 @@ from src.services.llm_providers.base import LLMProvider
 class GeminiProvider(LLMProvider):
     """Provider for Google Gemini API."""
     
-    def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
         self.api_key = api_key
         self.model = model
         self.available = False
@@ -42,7 +44,7 @@ class GeminiProvider(LLMProvider):
                         if "generateContent" in m.get("supportedGenerationMethods", [])]
         except:
             pass
-        return ["gemini-3-flash", "gemini-3-pro", "gemini-2.0-flash", "gemini-1.5-flash"]
+        return ["gemini-3-flash", "gemini-3-pro", "gemini-2.5-flash", "gemini-2.0-flash"]
 
     def set_model(self, model_name: str) -> bool:
         self.model = model_name

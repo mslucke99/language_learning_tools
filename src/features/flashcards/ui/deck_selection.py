@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, simpledialog, filedialog
 from src.core.database import FlashcardDatabase
 from src.features.flashcards.logic.spaced_repetition import get_due_flashcards, get_next_review_date
 from src.core.ui_utils import setup_standard_header
+from src.core.localization import tr
 
 class DeckSelectionFrame(ttk.Frame):
     def __init__(self, parent, controller, db: FlashcardDatabase):
@@ -16,7 +17,7 @@ class DeckSelectionFrame(ttk.Frame):
         
     def setup_ui(self):
         # Header with Back button
-        setup_standard_header(self, "Flashcard Decks", back_cmd=self.go_back)
+        setup_standard_header(self, tr("header_flashcards", "Flashcard Decks"), back_cmd=self.go_back)
 
         # Create canvas and scrollbar for the frame
         canvas = tk.Canvas(self, highlightthickness=0)
@@ -43,11 +44,11 @@ class DeckSelectionFrame(ttk.Frame):
         top_btn_frame = ttk.Frame(self.content_frame)
         top_btn_frame.pack(fill="x", pady=(0, 20))
         
-        create_btn = ttk.Button(top_btn_frame, text="Create New Deck", command=self.create_deck_dialog, style="Large.TButton")
+        create_btn = ttk.Button(top_btn_frame, text=tr("btn_create_deck", "Create New Deck"), command=self.create_deck_dialog, style="Large.TButton")
         create_btn.pack(side="left", padx=5, fill="x", expand=True)
         
         # Deck List
-        list_label = ttk.Label(self.content_frame, text="Your Decks:", font=("Arial", 13, "bold"))
+        list_label = ttk.Label(self.content_frame, text=tr("lbl_your_decks", "Your Decks:"), font=("Arial", 13, "bold"))
         list_label.pack(pady=(0, 10), anchor="w")
         
         tree_frame = ttk.Frame(self.content_frame)
@@ -57,9 +58,9 @@ class DeckSelectionFrame(ttk.Frame):
         self.decks_tree.column("#0", width=350)
         self.decks_tree.column("Total", width=120)
         self.decks_tree.column("Due", width=120)
-        self.decks_tree.heading("#0", text="Deck Name / Folder")
-        self.decks_tree.heading("Total", text="Total Cards")
-        self.decks_tree.heading("Due", text="Due Today")
+        self.decks_tree.heading("#0", text=tr("lbl_decks_folders", "Deck Name / Folder"))
+        self.decks_tree.heading("Total", text=tr("tree_total_cards", "Total Cards"))
+        self.decks_tree.heading("Due", text=tr("tree_due_today", "Due Today"))
         
         tree_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.decks_tree.yview)
         self.decks_tree.configure(yscrollcommand=tree_scroll.set)
@@ -71,33 +72,33 @@ class DeckSelectionFrame(ttk.Frame):
         deck_action_frame = ttk.Frame(self.content_frame)
         deck_action_frame.pack(fill="x", pady=20)
         
-        open_btn = ttk.Button(deck_action_frame, text="Open Deck", command=self.open_deck, style="Large.TButton")
+        open_btn = ttk.Button(deck_action_frame, text=tr("btn_open_deck", "Open Deck"), command=self.open_deck, style="Large.TButton")
         open_btn.grid(row=0, column=0, padx=5, sticky="ew")
         
-        stats_btn = ttk.Button(deck_action_frame, text="View Statistics", command=self.view_deck_stats, style="Large.TButton")
+        stats_btn = ttk.Button(deck_action_frame, text=tr("btn_view_stats", "View Statistics"), command=self.view_deck_stats, style="Large.TButton")
         stats_btn.grid(row=0, column=1, padx=5, sticky="ew")
         
-        delete_btn = ttk.Button(deck_action_frame, text="Delete Deck", command=self.delete_deck, style="Large.TButton")
+        delete_btn = ttk.Button(deck_action_frame, text=tr("btn_delete_deck", "Delete Deck"), command=self.delete_deck, style="Large.TButton")
         delete_btn.grid(row=0, column=3, padx=5, sticky="ew")
         
         deck_action_frame.columnconfigure((0,1,3), weight=1)
 
         # Folder Management
-        coll_frame = ttk.LabelFrame(self.content_frame, text="Folder Management", padding=10)
+        coll_frame = ttk.LabelFrame(self.content_frame, text=tr("btn_manage_folders", "Folder Management"), padding=10)
         coll_frame.pack(fill="x", pady=(0, 10))
         
-        ttk.Button(coll_frame, text="📁 Manage Folders", command=self.manage_collections_dialog).pack(side="left", padx=10)
-        ttk.Button(coll_frame, text="📂 Move Selected Deck to Folder", command=self.move_deck_to_collection_dialog).pack(side="left", padx=10)
+        ttk.Button(coll_frame, text=tr("btn_manage_folders", "📁 Manage Folders"), command=self.manage_collections_dialog).pack(side="left", padx=10)
+        ttk.Button(coll_frame, text=tr("btn_move_to_folder", "📂 Move Selected Deck to Folder"), command=self.move_deck_to_collection_dialog).pack(side="left", padx=10)
 
         # Import/Export (Deck specific)
-        io_frame = ttk.LabelFrame(self.content_frame, text="Import / Export", padding=10)
+        io_frame = ttk.LabelFrame(self.content_frame, text=tr("lbl_decks_folders", "Import / Export"), padding=10)
         io_frame.pack(fill="x", pady=(0, 20))
         
         btn_grid = ttk.Frame(io_frame)
         btn_grid.pack(fill="x")
         
-        ttk.Button(btn_grid, text="📥 Import Deck from CSV", command=self._import_deck_csv).pack(side="left", padx=5, fill="x", expand=True)
-        ttk.Button(btn_grid, text="📤 Export Selected Deck (CSV)", command=self._export_deck_csv).pack(side="left", padx=5, fill="x", expand=True)
+        ttk.Button(btn_grid, text=tr("btn_import_csv_deck", "📥 Import Deck from CSV"), command=self._import_deck_csv).pack(side="left", padx=5, fill="x", expand=True)
+        ttk.Button(btn_grid, text=tr("btn_export_csv_deck", "📤 Export Selected Deck (CSV)"), command=self._export_deck_csv).pack(side="left", padx=5, fill="x", expand=True)
         
         self.refresh_decks()
 

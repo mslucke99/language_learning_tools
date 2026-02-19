@@ -4,6 +4,7 @@ from src.features.study_center.logic.study_manager import StudyManager
 from src.features.study_center.logic.quiz_manager import QuizManager
 from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header
+from src.core.localization import tr
 
 class QuizUIFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, db: FlashcardDatabase, embedded=False):
@@ -21,7 +22,7 @@ class QuizUIFrame(ttk.Frame):
         
     def setup_ui(self):
         if not self.embedded:
-            setup_standard_header(self, "📝 Quiz Yourself", back_cmd=self.go_back)
+            setup_standard_header(self, tr("header_quiz", "📝 Quiz Yourself"), back_cmd=self.go_back)
         
         self.container = ttk.Frame(self)
         self.container.pack(fill="both", expand=True)
@@ -37,21 +38,21 @@ class QuizUIFrame(ttk.Frame):
         header_fr = ttk.Frame(self.container, padding=20)
         header_fr.pack(fill="x")
         
-        ttk.Label(header_fr, text="Quiz Dashboard", font=("Arial", 16, "bold")).pack(side="left")
-        ttk.Button(header_fr, text="✨ Start New Quiz", style="Accent.TButton", 
+        ttk.Label(header_fr, text=tr("lbl_quiz_dashboard", "Quiz Dashboard"), font=("Arial", 16, "bold")).pack(side="left")
+        ttk.Button(header_fr, text=tr("btn_start_new_quiz", "✨ Start New Quiz"), style="Accent.TButton", 
                    command=self._show_quiz_setup).pack(side="right")
         
         # History Table
-        history_fr = ttk.LabelFrame(self.container, text="Quiz History", padding=10)
+        history_fr = ttk.LabelFrame(self.container, text=tr("lbl_quiz_history", "Quiz History"), padding=10)
         history_fr.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         
         columns = ("date", "type", "difficulty", "score")
         self.history_tree = ttk.Treeview(history_fr, columns=columns, show="headings", height=15)
         
-        self.history_tree.heading("date", text="Date/Time")
-        self.history_tree.heading("type", text="Type")
-        self.history_tree.heading("difficulty", text="Difficulty")
-        self.history_tree.heading("score", text="Score")
+        self.history_tree.heading("date", text=tr("tree_date", "Date/Time"))
+        self.history_tree.heading("type", text=tr("tree_type", "Type"))
+        self.history_tree.heading("difficulty", text=tr("tree_difficulty", "Difficulty"))
+        self.history_tree.heading("score", text=tr("tree_score", "Score"))
         
         self.history_tree.column("date", width=180)
         self.history_tree.column("type", width=120)

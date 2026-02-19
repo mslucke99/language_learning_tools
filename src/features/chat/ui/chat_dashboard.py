@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.ui_utils import setup_standard_header
 from src.features.chat.ui.scenario_editor import ScenarioEditorDialog, ScenarioSelectorDialog
+from src.core.localization import tr
 
 class ChatDashboardFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, embedded=False):
@@ -14,51 +15,51 @@ class ChatDashboardFrame(ttk.Frame):
         
     def setup_ui(self):
         if not self.embedded:
-            setup_standard_header(self, "💬 Interactive Chat", back_cmd=self.go_back)
+            setup_standard_header(self, tr("header_interactive_chat", "💬 Interactive Chat"), back_cmd=self.go_back)
         
         # Chat Mode Selection
-        mode_frame = ttk.LabelFrame(self, text="Chat Mode", padding=10)
+        mode_frame = ttk.LabelFrame(self, text=tr("lbl_chat_mode", "Chat Mode"), padding=10)
         mode_frame.pack(fill="x", pady=10, padx=20)
         
         self.mode_var = tk.StringVar(value="topical")
         
-        ttk.Radiobutton(mode_frame, text="Topical - Free conversation on any topic", 
+        ttk.Radiobutton(mode_frame, text=tr("opt_topical", "Topical - Free conversation on any topic"), 
                        variable=self.mode_var, value="topical", 
                        command=self._on_mode_change).pack(anchor="w", pady=5)
-        ttk.Radiobutton(mode_frame, text="Role-Play - Interactive scenario with characters", 
+        ttk.Radiobutton(mode_frame, text=tr("opt_roleplay", "Role-Play - Interactive scenario with characters"), 
                        variable=self.mode_var, value="roleplay",
                        command=self._on_mode_change).pack(anchor="w", pady=5)
         
         # New Chat Controls - Topical Mode
-        self.topical_frame = ttk.LabelFrame(self, text="Start New Topical Conversation", padding=10)
+        self.topical_frame = ttk.LabelFrame(self, text=tr("lbl_start_topical", "Start New Topical Conversation"), padding=10)
         self.topical_frame.pack(fill="x", pady=10, padx=20)
         
-        ttk.Label(self.topical_frame, text="Conversation Topic:", font=("Segoe UI", 10)).pack(side="left")
+        ttk.Label(self.topical_frame, text=tr("lbl_topic", "Conversation Topic:"), font=("Segoe UI", 10)).pack(side="left")
         self.topic_entry = ttk.Entry(self.topical_frame, width=40)
         self.topic_entry.pack(side="left", padx=5)
-        self.topic_entry.insert(0, "Ordering at a Cafe")
+        self.topic_entry.insert(0, tr("msg_default_topic", "Ordering at a Cafe"))
         
-        ttk.Button(self.topical_frame, text="Start Chat", command=self._start_topical_chat).pack(side="left")
+        ttk.Button(self.topical_frame, text=tr("btn_start_chat", "Start Chat"), command=self._start_topical_chat).pack(side="left")
         
         # New Chat Controls - Roleplay Mode
-        self.roleplay_frame = ttk.LabelFrame(self, text="Start New Role-Play Session", padding=10)
+        self.roleplay_frame = ttk.LabelFrame(self, text=tr("lbl_start_roleplay", "Start New Role-Play Session"), padding=10)
         self.roleplay_frame.pack(fill="x", pady=10, padx=20)
         self.roleplay_frame.pack_forget()  # Hidden by default
         
-        ttk.Button(self.roleplay_frame, text="Create New Scenario", 
+        ttk.Button(self.roleplay_frame, text=tr("btn_create_scenario", "Create New Scenario"), 
                   command=self._create_roleplay_scenario).pack(side="left", padx=2)
-        ttk.Button(self.roleplay_frame, text="Select Existing Scenario", 
+        ttk.Button(self.roleplay_frame, text=tr("btn_select_scenario", "Select Existing Scenario"), 
                   command=self._select_roleplay_scenario).pack(side="left", padx=2)
         
         # Selected scenario display
-        self.selected_scenario_label = ttk.Label(self.roleplay_frame, text="No scenario selected", 
+        self.selected_scenario_label = ttk.Label(self.roleplay_frame, text=tr("lbl_no_scenario", "No scenario selected"), 
                                                  foreground="gray", font=("Segoe UI", 9, "italic"))
         self.selected_scenario_label.pack(side="left", padx=10)
         
         self.selected_scenario_id = None
         
         # Session List
-        ttk.Label(self, text="Recent Conversations:", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(20, 5), padx=20)
+        ttk.Label(self, text=tr("lbl_recent_chats", "Recent Conversations:"), font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(20, 5), padx=20)
         
         list_frame = ttk.Frame(self)
         list_frame.pack(fill="both", expand=True, padx=20)
@@ -84,7 +85,7 @@ class ChatDashboardFrame(ttk.Frame):
         
         sessions = self.study_manager.get_chat_sessions()
         if not sessions:
-            ttk.Label(scrollable_frame, text="No history yet. Start a new chat above!").pack(pady=20)
+            ttk.Label(scrollable_frame, text=tr("msg_no_chat_history", "No history yet. Start a new chat above!")).pack(pady=20)
         
         for session in sessions:
             self._add_session_button(scrollable_frame, session)
@@ -103,7 +104,7 @@ class ChatDashboardFrame(ttk.Frame):
         ttk.Label(s_frame, text=info, font=("Segoe UI", 11, "bold")).pack(side="left", padx=10, pady=10)
         ttk.Label(s_frame, text=date, font=("Segoe UI", 9)).pack(side="left", padx=10)
         
-        ttk.Button(s_frame, text="Continue", command=lambda s=session: self._open_chat_session(s['id'])).pack(side="right", padx=5)
+        ttk.Button(s_frame, text=tr("btn_continue", "Continue"), command=lambda s=session: self._open_chat_session(s['id'])).pack(side="right", padx=5)
     
     def _on_mode_change(self):
         """Handle mode selection change."""
@@ -119,7 +120,7 @@ class ChatDashboardFrame(ttk.Frame):
         """Start a topical chat session."""
         topic = self.topic_entry.get().strip()
         if not topic:
-            messagebox.showwarning("Topic Required", "Please enter a conversation topic.")
+            messagebox.showwarning(tr("header_topic_required", "Topic Required"), tr("msg_enter_topic", "Please enter a conversation topic."))
             return
         session_id = self.study_manager.create_chat_session(topic)
         self._open_chat_session(session_id)
@@ -144,7 +145,7 @@ class ChatDashboardFrame(ttk.Frame):
     def _start_roleplay_chat(self):
         """Start a roleplay chat session."""
         if not self.selected_scenario_id:
-            messagebox.showwarning("Scenario Required", "Please select or create a scenario first.")
+            messagebox.showwarning(tr("header_scenario_required", "Scenario Required"), tr("msg_select_scenario_first", "Please select or create a scenario first."))
             return
         
         try:

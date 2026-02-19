@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 from src.core.database import FlashcardDatabase
+from src.core.localization import tr
 
 class ManageCollectionsDialog:
     def __init__(self, parent, db: FlashcardDatabase, type_name: str, on_change=None):
@@ -9,30 +10,30 @@ class ManageCollectionsDialog:
         self.on_change = on_change
         
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title(f"Manage {type_name.capitalize()} Folders")
+        self.dialog.title(tr("title_manage_folders", "Manage {type} Folders", type=type_name.capitalize()))
         self.dialog.geometry("400x400")
         
         self.setup_ui()
         
     def setup_ui(self):
-        ttk.Label(self.dialog, text="Create New Folder:", font=("Arial", 10, "bold")).pack(pady=5)
+        ttk.Label(self.dialog, text=tr("lbl_create_new_folder", "Create New Folder:"), font=("Arial", 10, "bold")).pack(pady=5)
         self.name_var = tk.StringVar()
         ttk.Entry(self.dialog, textvariable=self.name_var, width=30).pack(pady=5)
         
-        ttk.Label(self.dialog, text="Parent Folder (Optional):").pack(pady=5)
+        ttk.Label(self.dialog, text=tr("lbl_parent_folder", "Parent Folder (Optional):")).pack(pady=5)
         colls = self.db.get_collections(self.type_name)
-        options = ["None"] + [c['name'] for c in colls]
+        options = [tr("opt_none", "None")] + [c['name'] for c in colls]
         self.coll_map = {c['name']: c['id'] for c in colls}
         
-        self.parent_var = tk.StringVar(value="None")
+        self.parent_var = tk.StringVar(value=tr("opt_none", "None"))
         parent_combo = ttk.Combobox(self.dialog, textvariable=self.parent_var, values=options, state="readonly")
         parent_combo.pack(pady=5)
         
-        ttk.Button(self.dialog, text="Create", command=self.add_coll).pack(pady=10)
+        ttk.Button(self.dialog, text=tr("btn_create", "Create"), command=self.add_coll).pack(pady=10)
         
         ttk.Separator(self.dialog, orient="horizontal").pack(fill="x", pady=10)
         
-        ttk.Label(self.dialog, text="Existing Folders:", font=("Arial", 10, "bold")).pack(pady=5)
+        ttk.Label(self.dialog, text=tr("lbl_existing_folders", "Existing Folders:"), font=("Arial", 10, "bold")).pack(pady=5)
         list_frame = ttk.Frame(self.dialog)
         list_frame.pack(fill="both", expand=True, padx=20)
         
@@ -41,7 +42,7 @@ class ManageCollectionsDialog:
         for c in colls:
             self.lb.insert("end", f"{c['name']} (ID: {c['id']})")
             
-        ttk.Button(self.dialog, text="Delete Selected", command=self.delete_coll).pack(pady=10)
+        ttk.Button(self.dialog, text=tr("btn_delete_selected", "Delete Selected"), command=self.delete_coll).pack(pady=10)
 
     def add_coll(self):
         name = self.name_var.get().strip()
@@ -71,22 +72,22 @@ class MoveItemDialog:
         self.on_change = on_change
         
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Move to Folder")
+        self.dialog.title(tr("title_move_to_folder", "Move to Folder"))
         self.dialog.geometry("300x150")
         
         self.setup_ui()
         
     def setup_ui(self):
-        ttk.Label(self.dialog, text="Select Folder:").pack(pady=10)
+        ttk.Label(self.dialog, text=tr("lbl_select_folder", "Select Folder:")).pack(pady=10)
         colls = self.db.get_collections(self.type_name)
-        options = ["None (Uncategorized)"] + [c['name'] for c in colls]
+        options = [tr("opt_none_uncategorized", "None (Uncategorized)")] + [c['name'] for c in colls]
         self.coll_map = {c['name']: c['id'] for c in colls}
         
         self.sel_var = tk.StringVar(value=options[0])
         combo = ttk.Combobox(self.dialog, textvariable=self.sel_var, values=options, state="readonly")
         combo.pack(pady=5)
         
-        ttk.Button(self.dialog, text="Move", command=self.save_move).pack(pady=10)
+        ttk.Button(self.dialog, text=tr("btn_move", "Move"), command=self.save_move).pack(pady=10)
         
     def save_move(self):
         coll_name = self.sel_var.get()

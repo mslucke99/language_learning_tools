@@ -6,14 +6,14 @@ class GeminiProvider implements LLMProvider {
   String? modelName;
   GenerativeModel? _model;
 
-  GeminiProvider({required this.apiKey, this.modelName = 'gemini-1.5-flash'});
+  GeminiProvider({required this.apiKey, this.modelName = 'gemini-2.5-flash'});
 
   @override
   String get providerName => "Google Gemini";
 
   GenerativeModel _getModel() {
     _model ??= GenerativeModel(
-      model: modelName ?? 'gemini-1.5-flash',
+      model: modelName ?? 'gemini-2.5-flash',
       apiKey: apiKey,
     );
     return _model!;
@@ -48,6 +48,11 @@ class GeminiProvider implements LLMProvider {
 
   @override
   Future<List<String>> getAvailableModels() async {
-    return ['gemini-1.5-flash', 'gemini-1.5-pro'];
+    return [
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+    ];
   }
 }

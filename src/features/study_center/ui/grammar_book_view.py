@@ -4,6 +4,7 @@ from src.features.study_center.logic.study_manager import StudyManager
 from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header, bind_mousewheel
 from src.features.study_center.ui.dialogs import ManageCollectionsDialog, MoveItemDialog
+from src.core.localization import tr
 
 class GrammarBookViewFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, db: FlashcardDatabase, embedded=False):
@@ -25,15 +26,15 @@ class GrammarBookViewFrame(ttk.Frame):
         if not self.embedded:
             setup_standard_header(
                 self,
-                "Grammar Book",
+                tr("header_grammar_book", "Grammar Book"),
                 back_cmd=self.go_back,
-                action_text="+ New Entry",
+                action_text=tr("btn_new_entry", "+ New Entry"),
                 action_cmd=self._new_grammar_entry
             )
         else:
             toolbar = ttk.Frame(self)
             toolbar.pack(fill="x", padx=10, pady=5)
-            ttk.Button(toolbar, text="+ New Grammar Entry", command=self._new_grammar_entry).pack(side="right")
+            ttk.Button(toolbar, text=tr("btn_new_entry", "+ New Grammar Entry"), command=self._new_grammar_entry).pack(side="right")
         
         container = ttk.Frame(self)
         container.pack(fill="both", expand=True)
@@ -44,7 +45,7 @@ class GrammarBookViewFrame(ttk.Frame):
         # LEFT PANE: Tree
         left_pane = ttk.Frame(paned_window)
         paned_window.add(left_pane, weight=1)
-        ttk.Label(left_pane, text="Folders & Entries", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        ttk.Label(left_pane, text=tr("lbl_folders_entries", "Folders & Entries"), font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
         
         ctrl_frame = ttk.Frame(left_pane)
         ctrl_frame.pack(fill="x", pady=(0, 5))
@@ -54,9 +55,11 @@ class GrammarBookViewFrame(ttk.Frame):
         
         sort_frame = ttk.Frame(ctrl_frame)
         sort_frame.pack(fill="x")
-        ttk.Label(sort_frame, text="Sort:").pack(side="left")
-        self.grammar_sort_var = tk.StringVar(value="Updated")
-        sort_dropdown = ttk.Combobox(sort_frame, textvariable=self.grammar_sort_var, values=["Updated", "A-Z"], state="readonly", width=10)
+        ttk.Label(sort_frame, text=tr("lbl_sort", "Sort:")).pack(side="left")
+        self.grammar_sort_var = tk.StringVar(value=tr("opt_sort_updated", "Updated"))
+        sort_dropdown = ttk.Combobox(sort_frame, textvariable=self.grammar_sort_var, 
+                                     values=[tr("opt_sort_updated", "Updated"), tr("opt_sort_az", "A-Z")], 
+                                     state="readonly", width=10)
         sort_dropdown.pack(side="left", padx=5)
         sort_dropdown.bind("<<ComboboxSelected>>", lambda e: self._update_grammar_view())
         
@@ -71,11 +74,11 @@ class GrammarBookViewFrame(ttk.Frame):
         
         tree_btns = ttk.Frame(left_pane)
         tree_btns.pack(fill="x", pady=5)
-        ttk.Button(tree_btns, text="📁 New Folder", command=lambda: ManageCollectionsDialog(self, self.db, 'grammar', self._update_grammar_view)).pack(side="left", padx=2, fill="x", expand=True)
-        ttk.Button(tree_btns, text="📂 Move Item", command=lambda: self._move_item_dialog()).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text=tr("btn_new_folder", "📁 New Folder"), command=lambda: ManageCollectionsDialog(self, self.db, 'grammar', self._update_grammar_view)).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text=tr("btn_move_item", "📂 Move Item"), command=lambda: self._move_item_dialog()).pack(side="left", padx=2, fill="x", expand=True)
         
         # RIGHT PANE: Editor
-        right_panel = ttk.LabelFrame(paned_window, text="Entry Editor", padding="15")
+        right_panel = ttk.LabelFrame(paned_window, text=tr("lbl_entry_editor", "Entry Editor"), padding="15")
         paned_window.add(right_panel, weight=3)
         
         # Status
@@ -87,14 +90,14 @@ class GrammarBookViewFrame(ttk.Frame):
         # Title
         title_frame = ttk.Frame(right_panel)
         title_frame.pack(fill="x", pady=(0, 10))
-        ttk.Label(title_frame, text="Title:", font=("Arial", 10, "bold")).pack(anchor="w")
+        ttk.Label(title_frame, text=tr("lbl_title_field", "Title:"), font=("Arial", 10, "bold")).pack(anchor="w")
         self.grammar_title_var = tk.StringVar()
         ttk.Entry(title_frame, textvariable=self.grammar_title_var, font=("Arial", 11)).pack(fill="x", pady=(2, 0))
         
         # Tags
         tags_frame = ttk.Frame(right_panel)
         tags_frame.pack(fill="x", pady=(0, 10))
-        ttk.Label(tags_frame, text="Tags (comma separated):").pack(anchor="w")
+        ttk.Label(tags_frame, text=tr("lbl_tags_field", "Tags (comma separated):")).pack(anchor="w")
         self.grammar_tags_var = tk.StringVar()
         ttk.Entry(tags_frame, textvariable=self.grammar_tags_var).pack(fill="x", pady=(2, 0))
         
@@ -127,6 +130,10 @@ class GrammarBookViewFrame(ttk.Frame):
             self.controller.show_study_dashboard()
 
     def _update_grammar_view(self):
+        # Preservation
+        scroll_pos = self.grammar_tree.yview()
+        selected_iid = self.grammar_tree.selection()
+
         search = self.grammar_search_var.get()
         sort_by = self.grammar_sort_var.get()
         
@@ -168,6 +175,15 @@ class GrammarBookViewFrame(ttk.Frame):
                 if not uncategorized_node: uncategorized_node = self.grammar_tree.insert("", "end", text="📦 Uncategorized", open=True)
                 parent = uncategorized_node
             self.grammar_tree.insert(parent, "end", iid=f"gram_{e['id']}", text=f"{self._get_prof_icon(e.get('proficiency',0))} {e['title']}")
+
+        # Restore
+        try:
+            self.grammar_tree.yview_moveto(scroll_pos[0])
+            if selected_iid:
+                if self.grammar_tree.exists(selected_iid[0]):
+                    self.grammar_tree.selection_set(selected_iid[0])
+                    self.grammar_tree.see(selected_iid[0])
+        except: pass
 
     def _on_grammar_entry_selected(self, event):
         selection = self.grammar_tree.selection()
@@ -224,10 +240,18 @@ class GrammarBookViewFrame(ttk.Frame):
 
     def _delete_grammar_entry(self):
         if not self.current_grammar_id: return
-        if messagebox.askyesno("Confirm Delete", "Delete entry?"):
+        if messagebox.askyesno(tr("lbl_confirm_delete", "Confirm Delete"), tr("msg_confirm_delete_prompt", "Are you sure you want to delete this item?")):
             self.study_manager.delete_grammar_entry(self.current_grammar_id)
             self._update_grammar_view()
             self._new_grammar_entry()
+
+    def on_show(self):
+        """Lifecycle hook: Refresh view."""
+        self._update_grammar_view()
+
+    def on_hide(self):
+        """Lifecycle hook."""
+        pass
 
     def _generate_grammar_explanation(self):
         topic = self.grammar_title_var.get().strip()
@@ -257,7 +281,7 @@ class GrammarBookViewFrame(ttk.Frame):
                        messagebox.showinfo("Complete", "Explanation ready!")
                   elif status['status'] == 'failed':
                        messagebox.showerror("Error", status.get("error"))
-        for t in completed: del self.active_tasks[t]
+        for t in completed: self.active_tasks.pop(t, None)
         self.after(1000, self._check_queue_status)
         
     def _move_item_dialog(self):
