@@ -18,6 +18,7 @@ class SentencesViewFrame(ttk.Frame):
         
         self.current_sentence_id = None
         self.current_sentence_explanation_id = None # Track for follow-ups
+        self.original_sentence_text = None  # Store original for reset
         self.sentences_data = []
         self.active_tasks = {}
         self.focus_vars = {}
@@ -88,8 +89,15 @@ class SentencesViewFrame(ttk.Frame):
         
         target_frame = ttk.LabelFrame(right_pane, text=tr("lbl_target_sentence", "Target Sentence"), padding="10")
         target_frame.pack(fill="x", pady=(0, 10))
-        self.sentence_display_text = scrolledtext.ScrolledText(target_frame, height=3, font=("Arial", 11), wrap="word", state="disabled")
+        self.sentence_display_text = scrolledtext.ScrolledText(target_frame, height=3, font=("Arial", 11), wrap="word")
         self.sentence_display_text.pack(fill="both", expand=True)
+        
+        # Sentence edit buttons frame
+        sentence_btn_frame = ttk.Frame(target_frame)
+        sentence_btn_frame.pack(fill="x", pady=(10, 0))
+        ttk.Button(sentence_btn_frame, text="✏️ Edit", command=self._toggle_edit_sentence).pack(side="left", padx=2)
+        ttk.Button(sentence_btn_frame, text="💾 Save Sentence", command=self._save_sentence_text).pack(side="left", padx=2)
+        ttk.Button(sentence_btn_frame, text="⟲ Reset", command=self._reset_sentence_text).pack(side="left", padx=2)
         
         self.notebook = ttk.Notebook(right_pane)
         self.notebook.pack(fill="both", expand=True)
@@ -234,10 +242,9 @@ class SentencesViewFrame(ttk.Frame):
         sent_data = next((s for s in self.sentences_data if s['id'] == sent_id), None)
         if not sent_data: return
         
-        self.sentence_display_text.config(state="normal")
         self.sentence_display_text.delete(1.0, tk.END)
         self.sentence_display_text.insert(tk.END, sent_data['sentence'])
-        self.sentence_display_text.config(state="disabled")
+        self.original_sentence_text = sent_data['sentence']  # Store original for reset
         
         explanation = self.study_manager.get_sentence_explanation(self.current_sentence_id)
         
@@ -267,6 +274,46 @@ class SentencesViewFrame(ttk.Frame):
             self.followup_history_text.delete(1.0, tk.END)
             self.followup_history_text.insert(tk.END, "(No explanation yet)")
             self.followup_history_text.config(state="disabled")
+
+    def _toggle_edit_sentence(self):
+        """Toggle edit mode for the sentence (currently just shows that it's editable)."""
+        messagebox.showinfo("Edit Mode", "The sentence field is now editable. Edit the text and click 'Save Sentence' to persist changes.")
+
+    def _save_sentence_text(self):
+        """Save the edited sentence text to the database."""
+        if not self.current_sentence_id:
+            messagebox.showwarning("Warning", "Please select a sentence first")
+            return
+        
+        new_sentence = self.sentence_display_text.get(1.0, tk.END).strip()
+        if not new_sentence:
+            messagebox.showwarning("Warning", "Sentence cannot be empty")
+            return
+        
+        if new_sentence == self.original_sentence_text:
+            messagebox.showinfo("No Changes", "The sentence text hasn't been modified.")
+            return
+        
+        try:
+            success, message = self.study_manager.update_sentence(self.current_sentence_id, new_sentence)
+            if success:
+                messagebox.showinfo("Success", message)
+                self.original_sentence_text = new_sentence  # Update the stored original
+                self.sentences_data = self.study_manager.get_imported_sentences()  # Refresh list
+                self._update_sentences_view()
+            else:
+                messagebox.showerror("Error", message)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save sentence: {e}")
+
+    def _reset_sentence_text(self):
+        """Reset the sentence text to the original."""
+        if not self.current_sentence_id or not self.original_sentence_text:
+            return
+        
+        self.sentence_display_text.delete(1.0, tk.END)
+        self.sentence_display_text.insert(tk.END, self.original_sentence_text)
+        messagebox.showinfo("Reset", "Sentence text has been reset to the original.")
 
     def _generate_sentence_explanation(self):
         if not self.current_sentence_id:

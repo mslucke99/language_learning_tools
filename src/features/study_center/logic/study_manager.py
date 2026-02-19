@@ -1442,6 +1442,38 @@ Any important exceptions or nuances.
         """Delete an imported sentence."""
         return self.db.delete_imported_content(imported_content_id)
 
+    def update_sentence(self, imported_content_id: int, new_sentence: str) -> Tuple[bool, str]:
+        """
+        Update the content of an imported sentence.
+        
+        Args:
+            imported_content_id: ID of the imported sentence
+            new_sentence: The updated sentence text
+            
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            # Update the imported_content
+            self.db.update_imported_content(
+                imported_content_id, 
+                content=new_sentence,
+                context=new_sentence  # Update context to match
+            )
+            
+            # Also update the sentence in any existing sentence_explanations
+            cursor = self.db.conn.cursor()
+            cursor.execute("""
+                UPDATE sentence_explanations
+                SET sentence = ?
+                WHERE imported_content_id = ?
+            """, (new_sentence, imported_content_id))
+            self.db.conn.commit()
+            
+            return True, "Sentence updated successfully"
+        except Exception as e:
+            return False, f"Error updating sentence: {str(e)}"
+
     # ========== STUDY STATISTICS ==========
     
     def get_study_statistics(self) -> Dict:
