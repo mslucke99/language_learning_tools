@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from src.core.database import FlashcardDatabase
 from src.features.flashcards.logic.spaced_repetition import get_next_review_date
+from src.core.localization import tr
 
 class CardListFrame(ttk.Frame):
     def __init__(self, parent, controller, db: FlashcardDatabase, deck_id: int):
@@ -13,26 +14,26 @@ class CardListFrame(ttk.Frame):
         self.setup_ui()
         
     def setup_ui(self):
-        title = ttk.Label(self, text="All Cards in Deck", font=("Arial", 16, "bold"))
+        title = ttk.Label(self, text=tr("header_card_list", "All Cards in Deck", deck=""), font=("Arial", 16, "bold"))
         title.pack(pady=10)
         
         self.current_all_flashcards = self.db.get_all_flashcards(self.deck_id)
         
         if not self.current_all_flashcards:
-            ttk.Label(self, text="No cards in this deck", font=("Arial", 12)).pack(pady=20)
+            ttk.Label(self, text=tr("msg_no_cards", "No cards in this deck"), font=("Arial", 12)).pack(pady=20)
         else:
             # Controls Frame (Search & Sort)
             controls_frame = ttk.Frame(self)
             controls_frame.pack(fill="x", pady=(0, 10), padx=20)
             
-            ttk.Label(controls_frame, text="Search:").pack(side="left", padx=(0, 5))
+            ttk.Label(controls_frame, text=tr("lbl_search", "Search:")).pack(side="left", padx=(0, 5))
             self.card_search_var = tk.StringVar()
             search_entry = ttk.Entry(controls_frame, textvariable=self.card_search_var, width=30)
             search_entry.pack(side="left", padx=(0, 20))
             search_entry.bind("<KeyRelease>", lambda e: self._filter_and_sort_cards())
             
-            ttk.Label(controls_frame, text="Sort By:").pack(side="left", padx=(0, 5))
-            self.card_sort_var = tk.StringVar(value="Newest First")
+            ttk.Label(controls_frame, text=tr("lbl_sort_by", "Sort By:")).pack(side="left", padx=(0, 5))
+            self.card_sort_var = tk.StringVar(value=tr("opt_sort_newest", "Newest First"))
             sort_options = ["Newest First", "Oldest First", "A-Z (Question)", "Accuracy (Low)", "Accuracy (High)"]
             sort_dropdown = ttk.Combobox(controls_frame, textvariable=self.card_sort_var, values=sort_options, state="readonly", width=15)
             sort_dropdown.pack(side="left")
@@ -43,9 +44,9 @@ class CardListFrame(ttk.Frame):
             self.cards_tree.column("#0", width=300)
             self.cards_tree.column("Accuracy", width=150)
             self.cards_tree.column("Next Review", width=200)
-            self.cards_tree.heading("#0", text="Question")
-            self.cards_tree.heading("Accuracy", text="Accuracy")
-            self.cards_tree.heading("Next Review", text="Next Review Date")
+            self.cards_tree.heading("#0", text=tr("tree_question", "Question"))
+            self.cards_tree.heading("Accuracy", text=tr("tree_accuracy", "Accuracy"))
+            self.cards_tree.heading("Next Review", text=tr("tree_next_review", "Next Review Date"))
             self.cards_tree.pack(fill="both", expand=True, pady=10, padx=20)
             
             # Scrollbar
@@ -57,10 +58,10 @@ class CardListFrame(ttk.Frame):
             action_frame = ttk.Frame(self)
             action_frame.pack(fill="x", pady=10, padx=20)
             
-            ttk.Button(action_frame, text="Edit Selected", command=self.edit_selected_card).pack(side="left", padx=5)
-            ttk.Button(action_frame, text="Delete Selected", command=self.delete_selected_card_from_list).pack(side="left", padx=5)
+            ttk.Button(action_frame, text=tr("btn_edit_selected", "Edit Selected"), command=self.edit_selected_card).pack(side="left", padx=5)
+            ttk.Button(action_frame, text=tr("btn_delete_selected", "Delete Selected"), command=self.delete_selected_card_from_list).pack(side="left", padx=5)
         
-        ttk.Button(self, text="Back", command=self.go_back).pack(pady=10)
+        ttk.Button(self, text=tr("btn_back", "Back"), command=self.go_back).pack(pady=10)
         
         if self.current_all_flashcards:
             self._filter_and_sort_cards()

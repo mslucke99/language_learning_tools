@@ -19,8 +19,27 @@ class LocalizationManager:
         self.current_locale = 'en'
         self.default_locale = 'en'
         self.locales_dir = os.path.join(os.path.dirname(__file__), '..', 'resources', 'locales')
+        self.observers = []
         self.initialized = True
         self.load_locale(self.default_locale)
+
+    def subscribe(self, callback):
+        """Register a callback to be notified when the locale changes."""
+        if callback not in self.observers:
+            self.observers.append(callback)
+
+    def unsubscribe(self, callback):
+        """Unregister a callback."""
+        if callback in self.observers:
+            self.observers.remove(callback)
+
+    def _notify_observers(self):
+        """Notify all observers of a locale change."""
+        for callback in self.observers:
+            try:
+                callback()
+            except Exception as e:
+                print(f"[Localization] Error notifying observer: {e}")
 
     def load_locale(self, lang_code: str):
         """Load a locale file. Falls back to default if failed."""
@@ -41,6 +60,7 @@ class LocalizationManager:
                 self.locale_data = json.load(f)
             self.current_locale = lang_code
             print(f"[Localization] Loaded locale: {lang_code}")
+            self._notify_observers()
             
         except Exception as e:
             print(f"[Localization] Error loading locale {lang_code}: {e}")
@@ -69,3 +89,9 @@ def set_locale(lang_code: str):
 
 def get_current_locale() -> str:
     return _loc_manager.current_locale
+
+def subscribe_locale(callback):
+    _loc_manager.subscribe(callback)
+
+def unsubscribe_locale(callback):
+    _loc_manager.unsubscribe(callback)

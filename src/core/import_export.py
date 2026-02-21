@@ -19,11 +19,19 @@ class ImportExportManager:
             if not cards:
                 return False
 
+            # Get deck name for tagging
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT name FROM decks WHERE id = ?", (deck_id,))
+            row = cursor.fetchone()
+            deck_name = row[0] if row else "LanguageLearning"
+            # Sanitize for Anki tags
+            tag = deck_name.replace(" ", "_")
+
             with open(file_path, mode='w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                # Anki usually expects Front, Back
+                # Anki: Front, Back, Tags
                 for card in cards:
-                    writer.writerow([card.question, card.answer])
+                    writer.writerow([card.question, card.answer, tag])
             return True
         except Exception as e:
             print(f"Export error: {e}")

@@ -12,6 +12,7 @@ from src.features.study_center.ui.grammar_book_view import GrammarBookViewFrame
 from src.features.study_center.ui.quiz_ui import QuizUIFrame
 from src.features.writing_lab.ui.writing_lab import WritingLabFrame
 from src.features.chat.ui.chat_dashboard import ChatDashboardFrame
+from src.features.mining.ui.mining_view import SentenceMiningView
 
 class StudyDashboardFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, db: FlashcardDatabase):
@@ -30,33 +31,39 @@ class StudyDashboardFrame(ttk.Frame):
         self.notebook.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         # Tab 1: Overview & Stats
-        stats_tab = ttk.Frame(self.notebook, padding=20)
-        self.notebook.add(stats_tab, text=tr("tab_overview", "📊 Overview"))
-        self._setup_stats_tab(stats_tab)
+        self.stats_tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(self.stats_tab, text=tr("tab_overview", "📊 Overview"))
+        self._setup_stats_tab(self.stats_tab)
         
         # Tab 2: Words
-        words_tab = WordsViewFrame(self.notebook, self.controller, self.study_manager, self.db, embedded=True)
-        self.notebook.add(words_tab, text=tr("tab_words", "📚 Words"))
+        self.words_tab = WordsViewFrame(self.notebook, self.controller, self.study_manager, self.db, embedded=True)
+        self.notebook.add(self.words_tab, text=tr("tab_words", "📚 Words"))
         
         # Tab 3: Sentences
-        sentences_tab = SentencesViewFrame(self.notebook, self.controller, self.study_manager, self.db, embedded=True)
-        self.notebook.add(sentences_tab, text=tr("tab_sentences", "📖 Sentences"))
+        self.sentences_tab = SentencesViewFrame(self.notebook, self.controller, self.study_manager, self.db, embedded=True)
+        self.notebook.add(self.sentences_tab, text=tr("tab_sentences", "📖 Sentences"))
         
         # Tab 4: Grammar
-        grammar_tab = GrammarBookViewFrame(self.notebook, self.controller, self.study_manager, self.db, embedded=True)
-        self.notebook.add(grammar_tab, text=tr("tab_grammar", "📒 Grammar"))
+        self.grammar_tab = GrammarBookViewFrame(self.notebook, self.controller, self.study_manager, self.db, embedded=True)
+        self.notebook.add(self.grammar_tab, text=tr("tab_grammar", "📒 Grammar"))
         
         # Tab 5: Writing Lab
-        writing_tab = WritingLabFrame(self.notebook, self.controller, self.study_manager, embedded=True)
-        self.notebook.add(writing_tab, text=tr("tab_writing", "✍️ Writing Lab"))
+        self.writing_tab = WritingLabFrame(self.notebook, self.controller, self.study_manager, embedded=True)
+        self.notebook.add(self.writing_tab, text=tr("tab_writing", "✍️ Writing Lab"))
         
         # Tab 6: AI Chat
-        chat_tab = ChatDashboardFrame(self.notebook, self.controller, self.study_manager, embedded=True)
-        self.notebook.add(chat_tab, text=tr("tab_chat", "💬 AI Chat"))
+        self.chat_tab = ChatDashboardFrame(self.notebook, self.controller, self.study_manager, embedded=True)
+        self.notebook.add(self.chat_tab, text=tr("tab_chat", "💬 AI Chat"))
         
         # Tab 7: Quiz
-        quiz_tab = QuizUIFrame(self.notebook, self.controller, self.study_manager, self.db, embedded=True)
-        self.notebook.add(quiz_tab, text=tr("tab_quiz", "📝 Quiz"))
+        self.quiz_tab = QuizUIFrame(self.notebook, self.controller, self.study_manager, self.db, embedded=True)
+        self.notebook.add(self.quiz_tab, text=tr("tab_quiz", "📝 Quiz"))
+
+        # Tab 8: Sentence Mining
+        self.mining_tab = SentenceMiningView(self.notebook, self.db, study_manager=self.study_manager)
+        self.notebook.add(self.mining_tab, text=tr("tab_mining", "⛏️ Mining"))
+        
+        self.tabs = [self.stats_tab, self.words_tab, self.sentences_tab, self.grammar_tab, self.writing_tab, self.chat_tab, self.quiz_tab, self.mining_tab]
         
         # Bind Tab Shortcuts (Ctrl+1 to Ctrl+6)
         # Note: We bind to the parent because the frame itself might not have focus
@@ -65,8 +72,22 @@ class StudyDashboardFrame(ttk.Frame):
         
         # Actually, global binding checking for visibility is safer for Tkinter
         # but let's try binding to the notebook which should receive events when active
-        for i in range(1, 7):
+        for i in range(1, 9):
             self.controller.root.bind(f"<Control-Key-{i}>", self._make_tab_switcher(i-1), add="+")
+        
+        # Bind tab change event to call on_show on the newly selected tab
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+    def _on_tab_changed(self, event=None):
+        """Called when user switches between tabs within the notebook."""
+        try:
+            current_tab_index = self.notebook.index("current")
+            if 0 <= current_tab_index < len(self.tabs):
+                active_tab = self.tabs[current_tab_index]
+                if hasattr(active_tab, 'on_show'):
+                    active_tab.on_show()
+        except Exception:
+            pass
 
     def _make_tab_switcher(self, index):
         """Factory for tab switch callbacks to capture index."""
@@ -77,31 +98,30 @@ class StudyDashboardFrame(ttk.Frame):
         return _switch
 
     def _setup_stats_tab(self, parent):
-        stats = self.study_manager.get_study_statistics()
-        
-        title_lbl = ttk.Label(parent, text=tr("title_progress", "Learning Progress"), font=("Arial", 16, "bold"))
-        title_lbl.pack(pady=(0, 20))
-        
-        stats_frame = ttk.LabelFrame(parent, text=tr("lbl_stats", "Detailed Statistics"), padding="15")
-        stats_frame.pack(fill="x", pady=5)
-        
-        stats_content = f"""
-Words in Library: {stats['total_words']}
-Words Processed: {stats['words_with_definitions']} ({stats['words_percentage']:.1f}%)
-
-Sentences in Library: {stats['total_sentences']}
-Sentences Explained: {stats['sentences_with_explanations']} ({stats['sentences_percentage']:.1f}%)
-
-Configuration:
-  Study Language: {self.study_manager.study_language}
-  Native Language: {self.study_manager.native_language}
-        """
-        
-        stats_label = ttk.Label(stats_frame, text=stats_content, justify="left", font=("Courier", 10))
-        stats_label.pack()
+        from src.features.statistics.ui.statistics_view import StatisticsViewFrame
+        stats_view = StatisticsViewFrame(parent, self.controller, self.db)
+        stats_view.pack(fill="both", expand=True)
         
         info_lbl = ttk.Label(parent, text="Use the tabs above to switch between different study tools.", font=("Arial", 10, "italic"))
         info_lbl.pack(pady=20)
+
+    def on_show(self):
+        """Refresh logic when dashboard becomes visible again."""
+        # Refresh the active tab if it has an on_show method
+        current_tab_index = self.notebook.index("current")
+        if 0 <= current_tab_index < len(self.tabs):
+            active_tab = self.tabs[current_tab_index]
+            if hasattr(active_tab, 'on_show'):
+                active_tab.on_show()
+
+    def on_hide(self):
+        """Logic when dashboard is hidden."""
+        # Notify active tab
+        current_tab_index = self.notebook.index("current")
+        if 0 <= current_tab_index < len(self.tabs):
+            active_tab = self.tabs[current_tab_index]
+            if hasattr(active_tab, 'on_hide'):
+                active_tab.on_hide()
 
     def go_back(self):
         if hasattr(self.controller, 'show_home'):

@@ -65,7 +65,9 @@ class StudyManager:
             'word': prompts.WORD_PROMPTS,
             'sentence': prompts.SENTENCE_PROMPTS,
             'writing': prompts.WRITING_PROMPTS,
-            'chat': prompts.CHAT_PROMPTS
+            'chat': prompts.CHAT_PROMPTS,
+            'roleplay': prompts.ROLEPLAY_PROMPTS,
+            'practice': prompts.PRACTICE_PROMPTS
         }
         
         # Start worker thread (At the very end to ensure all methods/attrs are ready)
@@ -154,6 +156,10 @@ class StudyManager:
     def get_effective_prompt(self, category: str, prompt_id: str, template_type: str = 'template') -> str:
         """Public access to effective prompt."""
         return self._get_effective_prompt(category, prompt_id, template_type)
+
+    def ai_available(self) -> bool:
+        """Check if the AI service is available."""
+        return self.ai_client is not None and self.ai_client.is_available()
 
     def update_llm_config(self, provider: str, model: str, base_url: str = None):
         """Update and activate an LLM provider configuration."""
@@ -306,6 +312,10 @@ class StudyManager:
                 
             elif task_type == 'chat_message':
                 return "Generating AI chat response"
+                
+            elif task_type == 'generate_roleplay_scenario':
+                scenario_type = kwargs.get('scenario_type', 'Scenario')
+                return f"Generating {scenario_type} scenario"
         except:
             pass
             
@@ -362,7 +372,7 @@ class StudyManager:
                 elif task_type == 'grade_writing':
                     success, result, suggestions = self.grade_writing(kwargs.get('user_writing'), kwargs.get('topic'))
                 elif task_type == 'writing_topic':
-                    success, result, suggestions = self.generate_writing_topic()
+                    success, result, suggestions = self.generate_writing_topic(**kwargs)
                 elif task_type == 'chat_message':
                     # Fetch current history for context
                     session_id = kwargs.get('session_id')
@@ -372,6 +382,9 @@ class StudyManager:
                     if 'current_history' not in kwargs:
                         kwargs['current_history'] = []
                     success, result, suggestions = self.send_chat_message(**kwargs)
+                elif task_type == 'generate_roleplay_scenario':
+                    success, result = self.generate_roleplay_scenario(kwargs.get('scenario_type'))
+                    suggestions = {}
                 else:
                     success, result, suggestions = False, "Unknown task type", {}
                 
@@ -453,6 +466,18 @@ class StudyManager:
         """Set the language being studied."""
         self._set_setting('study_language', language)
         self.study_language = language
+
+    def get_study_language_code(self) -> str:
+        """
+        Get the 2-letter ISO code for the current study language.
+        Defaults to 'es' (Spanish) if unknown.
+        """
+        from src.services.text.vocab_calibration import VocabCalibrationService
+        
+        # Create reverse map: 'Korean' -> 'ko', 'Spanish' -> 'es', etc.
+        name_to_code = {v: k for k, v in VocabCalibrationService.DISPLAY_NAMES.items()}
+        
+        return name_to_code.get(self.study_language, 'es')
     
     def set_definition_language_preference(self, prefer_native: bool):
         """Set whether to prefer native language for definitions."""
@@ -1408,7 +1433,47 @@ Any important exceptions or nuances.
             return True, "Sentence added successfully"
         except Exception as e:
             return False, f"Error adding sentence: {str(e)}"
+
+    def delete_word(self, imported_content_id: int) -> bool:
+        """Delete an imported word."""
+        return self.db.delete_imported_content(imported_content_id)
+
+    def delete_sentence(self, imported_content_id: int) -> bool:
+        """Delete an imported sentence."""
+        return self.db.delete_imported_content(imported_content_id)
+
+    def update_sentence(self, imported_content_id: int, new_sentence: str) -> Tuple[bool, str]:
+        """
+        Update the content of an imported sentence.
+        
+        Args:
+            imported_content_id: ID of the imported sentence
+            new_sentence: The updated sentence text
             
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            # Update the imported_content
+            self.db.update_imported_content(
+                imported_content_id, 
+                content=new_sentence,
+                context=new_sentence  # Update context to match
+            )
+            
+            # Also update the sentence in any existing sentence_explanations
+            cursor = self.db.conn.cursor()
+            cursor.execute("""
+                UPDATE sentence_explanations
+                SET sentence = ?
+                WHERE imported_content_id = ?
+            """, (new_sentence, imported_content_id))
+            self.db.conn.commit()
+            
+            return True, "Sentence updated successfully"
+        except Exception as e:
+            return False, f"Error updating sentence: {str(e)}"
+
     # ========== STUDY STATISTICS ==========
     
     def get_study_statistics(self) -> Dict:
@@ -1445,15 +1510,28 @@ Any important exceptions or nuances.
         }
     # ========== WRITING COMPOSITION LAB ==========
 
-    def generate_writing_topic(self) -> Tuple[bool, str, Dict]:
+    def generate_writing_topic(self, **kwargs) -> Tuple[bool, str, Dict]:
         """Generate a creative writing topic using AI."""
         if not self.ai_client or not self.ai_client.is_available():
             return False, "AI service is not available", {}
             
         prompt_template = self._get_effective_prompt('writing', 'generate_topic')
+        
+        # Get options from kwargs with defaults
+        difficulty = kwargs.get('difficulty', 'intermediate')
+        scenario_type = kwargs.get('scenario_type', 'Any type')
+        topic_category = kwargs.get('topic_category', 'Any topic')
+        
+        # Format scenario and category for the prompt
+        scenario_str = f"Write as a {scenario_type} format. " if scenario_type != 'Any type' else ""
+        category_str = f"The topic should be about {topic_category}. " if topic_category != 'Any topic' else ""
+        
         prompt = prompt_template.format(
             study_language=self.study_language,
-            native_language=self.native_language
+            native_language=self.native_language,
+            difficulty=difficulty,
+            scenario_type=scenario_str,
+            topic_category=category_str
         )
         
         try:
@@ -1561,6 +1639,46 @@ Any important exceptions or nuances.
     def delete_roleplay_scenario(self, scenario_id: int) -> bool:
         """Delete a roleplay scenario."""
         return self.db.delete_roleplay_scenario(scenario_id)
+
+    def generate_roleplay_scenario(self, scenario_type: str) -> Tuple[bool, Dict]:
+        """
+        Generate a roleplay scenario using AI.
+        
+        Args:
+            scenario_type: The type of scenario (e.g., 'Everyday Life', 'Fantasy')
+            
+        Returns:
+            Tuple of (success: bool, scenario_data: Dict)
+        """
+        if not self.ai_client or not self.ai_client.is_available():
+            return False, {"error": "AI service is not available"}
+            
+        prompt_template = self._get_effective_prompt('roleplay', 'generate_scenario')
+        prompt = prompt_template.format(
+            study_language=self.study_language,
+            native_language=self.native_language,
+            scenario_type=scenario_type
+        )
+        
+        start_time = time.time()
+        try:
+            content = self.ai_client.generate_response(prompt, timeout=self.request_timeout)
+            duration = time.time() - start_time
+            desc = f"Generate scenario: {scenario_type}"
+            self._log_debug('generate_roleplay_scenario', prompt, content or "EMPTY", duration, description=desc)
+            
+            if content:
+                # Extract JSON if wrapped in markdown
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    import json
+                    scenario_data = json.loads(json_match.group(0))
+                    return True, scenario_data
+                return False, {"error": "Failed to parse AI response (JSON not found)"}
+            return False, {"error": "Failed to generate scenario"}
+        except Exception as e:
+            self._log_debug('generate_roleplay_scenario', prompt, "ERROR", time.time() - start_time, error=str(e))
+            return False, {"error": str(e)}
 
     def send_chat_message(self, session_id: int, user_message: str, current_history: List[Dict]) -> Tuple[bool, Dict, Dict]:
         """Send a message to the AI and process the response."""
@@ -1709,20 +1827,3 @@ Any important exceptions or nuances.
             dialogue += f"**{name}** ({role}): {content}\n"
         
         return dialogue if dialogue else ""
-
-    def _get_effective_prompt(self, category: str, key: str) -> str:
-        """Get effective prompt template."""
-        if category == 'word':
-            template_key = 'native_template' if self.prefer_native_definitions else 'study_template'
-            return WORD_PROMPTS.get(key, {}).get(template_key, "")
-        elif category == 'sentence':
-            return SENTENCE_PROMPTS.get(key, {}).get('template', "")
-        elif category == 'chat':
-            return CHAT_PROMPTS.get(key, {}).get('template', "")
-        elif category == 'writing':
-            return WRITING_PROMPTS.get(key, {}).get('template', "")
-        elif category == 'roleplay':
-            return ROLEPLAY_PROMPTS.get(key, {}).get('template', "")
-        elif category == 'practice':
-            return PRACTICE_PROMPTS.get(key, {}).get('template', "")
-        return ""

@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from src.core.database import FlashcardDatabase
+from src.core.localization import tr
 
 class DeckOverviewFrame(ttk.Frame):
     def __init__(self, parent, controller, db: FlashcardDatabase, deck_id: int):
@@ -26,15 +27,15 @@ class DeckOverviewFrame(ttk.Frame):
         self.pack(fill="both", expand=True)
         
         # Title
-        title = ttk.Label(self, text=f"Deck: {deck_name}", font=("Arial", 22, "bold"))
+        title = ttk.Label(self, text=tr("header_deck_overview", "Deck: {name}", name=deck_name), font=("Arial", 22, "bold"))
         title.pack(pady=20)
         
         # Statistics
-        stats_frame = ttk.LabelFrame(self, text="Statistics", padding="15")
+        stats_frame = ttk.LabelFrame(self, text=tr("lbl_deck_stats", "Statistics"), padding="15")
         stats_frame.pack(fill="x", pady=15, padx=20)
         
-        stats_text = f"""Total Cards: {deck_stats['total_cards']}  |  Due Today: {deck_stats['due_cards']}
-Total Reviews: {deck_stats['total_reviews']}  |  Accuracy: {deck_stats['overall_accuracy']:.1f}%"""
+        stats_text = f"{tr('lbl_total_cards_count', 'Total Cards:')} {deck_stats['total_cards']}  |  {tr('lbl_due_cards_count', 'Due Today:')} {deck_stats['due_cards']}\n" \
+                     f"{tr('lbl_total_reviews', 'Total Reviews')}: {deck_stats['total_reviews']}  |  {tr('tree_accuracy', 'Accuracy')}: {deck_stats['overall_accuracy']:.1f}%"
         
         ttk.Label(stats_frame, text=stats_text, font=("Arial", 11)).pack()
         
@@ -42,13 +43,13 @@ Total Reviews: {deck_stats['total_reviews']}  |  Accuracy: {deck_stats['overall_
         btn_frame = ttk.Frame(self)
         btn_frame.pack(fill="x", pady=25, padx=20)
         
-        review_btn = ttk.Button(btn_frame, text="Review Cards", command=self.start_review, style="Large.TButton")
+        review_btn = ttk.Button(btn_frame, text=tr("btn_review_cards", "Review Cards"), command=self.start_review, style="Large.TButton")
         review_btn.pack(side="left", padx=10, fill="both", expand=True)
         
-        add_btn = ttk.Button(btn_frame, text="Add Card", command=self.add_card_dialog, style="Large.TButton")
+        add_btn = ttk.Button(btn_frame, text=tr("btn_add_card", "Add Card"), command=self.add_card_dialog, style="Large.TButton")
         add_btn.pack(side="left", padx=10, fill="both", expand=True)
         
-        view_btn = ttk.Button(btn_frame, text="View All Cards", command=self.view_all_cards, style="Large.TButton")
+        view_btn = ttk.Button(btn_frame, text=tr("btn_view_all_cards", "View All Cards"), command=self.view_all_cards, style="Large.TButton")
         view_btn.pack(side="left", padx=10, fill="both", expand=True)
         
         # Check logic for AI Service availability
@@ -56,8 +57,14 @@ Total Reviews: {deck_stats['total_reviews']}  |  Accuracy: {deck_stats['overall_
             grammar_btn = ttk.Button(btn_frame, text="Grammar Help", command=self.show_grammar_help, style="Large.TButton")
             grammar_btn.pack(side="left", padx=10, fill="both", expand=True)
         
-        back_btn = ttk.Button(btn_frame, text="Back", command=self.go_back, style="Large.TButton")
+        back_btn = ttk.Button(btn_frame, text=tr("btn_back", "Back"), command=self.go_back, style="Large.TButton")
         back_btn.pack(side="left", padx=10, fill="both", expand=True)
+
+        # Export button (new row or same row if space)
+        # Check if we should wrap buttons? For now add to right.
+        export_btn = ttk.Button(btn_frame, text=tr("btn_export_deck", "Export CSV"), command=self.export_deck, style="Large.TButton")
+        export_btn.pack(side="left", padx=10, fill="both", expand=True)
+
 
     def start_review(self):
         if hasattr(self.controller, 'start_review'):
@@ -70,6 +77,11 @@ Total Reviews: {deck_stats['total_reviews']}  |  Accuracy: {deck_stats['overall_
     def go_back(self):
         if hasattr(self.controller, 'show_deck_selection'):
             self.controller.show_deck_selection()
+
+    def export_deck(self):
+        if hasattr(self.controller, 'export_deck_to_csv'):
+            self.controller.export_deck_to_csv(self.deck_id)
+
 
     def add_card_dialog(self):
         """Show dialog to add a new card."""

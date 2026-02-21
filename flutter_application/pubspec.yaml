@@ -68,6 +68,10 @@ dependencies:
   uuid: ^4.3.3
   sqflite_common_ffi: ^2.4.0+2
   xml: ^6.3.0
+  shared_preferences: ^2.2.2
+
+  # Ads
+  google_mobile_ads: ^5.1.0
 
 dev_dependencies:
   flutter_test:

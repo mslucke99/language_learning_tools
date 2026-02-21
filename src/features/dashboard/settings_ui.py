@@ -5,6 +5,7 @@ import threading
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.ui_utils import setup_standard_header
 from src.features.dashboard.prompt_editor_ui import PromptEditorDialog
+from src.features.dashboard.dictionary_settings_ui import DictionarySettingsFrame
 from src.core.localization import tr, set_locale
 
 # Config dir is now handled largely by the manager but kept for display if needed
@@ -75,6 +76,7 @@ class SettingsUI(ttk.Frame):
         ui_lang_frame.grid(row=2, column=1, sticky="w", padx=15)
         ttk.Button(ui_lang_frame, text="EN", width=5, command=lambda: self._switch_ui('en')).pack(side="left", padx=2)
         ttk.Button(ui_lang_frame, text="KO", width=5, command=lambda: self._switch_ui('ko')).pack(side="left", padx=2)
+        ttk.Button(ui_lang_frame, text="ES", width=5, command=lambda: self._switch_ui('es')).pack(side="left", padx=2)
 
         ttk.Label(gen_tab, text=tr("tip_languages", "Tip: Study language is what you are learning. Native language is used for definitions and UI."), 
                   font=("Arial", 9, "italic"), foreground="gray", wraplength=500).pack(anchor="w", pady=20)
@@ -105,117 +107,122 @@ class SettingsUI(ttk.Frame):
         
         self._refresh_model_list()
         
-        ttk.Label(ai_grid, text="Request Timeout (sec):").grid(row=1, column=0, sticky="w", pady=10)
+        
+        ttk.Label(ai_grid, text=tr("lbl_timeout", "Request Timeout (sec):")).grid(row=1, column=0, sticky="w", pady=10)
         ttk.Spinbox(ai_grid, from_=5, to=300, increment=5, textvariable=self.timeout_var, width=10).grid(row=1, column=1, sticky="w", padx=15)
         
-        ttk.Checkbutton(ai_tab, text="Pre-load model on application startup", variable=self.preload_var).pack(anchor="w", pady=15)
+        ttk.Checkbutton(ai_tab, text=tr("lbl_preload", "Pre-load model on application startup"), variable=self.preload_var).pack(anchor="w", pady=15)
         
         # --- TAB 2.5: AI PROVIDERS ---
         prov_tab = ttk.Frame(self.notebook, padding="20")
-        self.notebook.add(prov_tab, text="🤖 AI Providers")
+        self.notebook.add(prov_tab, text=tr("tab_ai_providers", "🤖 AI Providers"))
         
-        ttk.Label(prov_tab, text="Manage AI Backends", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(prov_tab, text=tr("lbl_manage_backends", "Manage AI Backends"), font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
         
         prov_grid = ttk.Frame(prov_tab)
         prov_grid.pack(fill="x")
         
-        ttk.Label(prov_grid, text="AI Backend:").grid(row=0, column=0, sticky="w", pady=10)
+        ttk.Label(prov_grid, text=tr("lbl_ai_backend", "AI Backend:")).grid(row=0, column=0, sticky="w", pady=10)
         self.prov_combo = ttk.Combobox(prov_grid, textvariable=self.provider_var, state="readonly", width=32,
                                      values=["ollama", "openai", "gemini", "lm_studio", "llama_cpp", "openai_compatible"])
         self.prov_combo.grid(row=0, column=1, sticky="w", padx=15)
         self.prov_combo.bind("<<ComboboxSelected>>", self._on_provider_changed)
         
         # API Key (Masked)
-        self.lbl_key = ttk.Label(prov_grid, text="API Key:")
+        self.lbl_key = ttk.Label(prov_grid, text=tr("lbl_api_key", "API Key:"))
         self.lbl_key.grid(row=1, column=0, sticky="w", pady=10)
         self.ent_key = ttk.Entry(prov_grid, textvariable=self.api_key_var, width=35, show="*")
         self.ent_key.grid(row=1, column=1, sticky="w", padx=15)
         
         # Base URL
-        self.lbl_url = ttk.Label(prov_grid, text="Base URL:")
+        self.lbl_url = ttk.Label(prov_grid, text=tr("lbl_base_url", "Base URL:"))
         self.lbl_url.grid(row=2, column=0, sticky="w", pady=10)
         self.ent_url = ttk.Entry(prov_grid, textvariable=self.base_url_var, width=35)
         self.ent_url.grid(row=2, column=1, sticky="w", padx=15)
         
         actions_fr = ttk.Frame(prov_tab)
         actions_fr.pack(fill="x", pady=20)
-        ttk.Button(actions_fr, text="Test Connection", command=self._test_provider_connection).pack(side="left")
-        ttk.Button(actions_fr, text="Apply Backend", command=self._apply_provider_config, style="Accent.TButton").pack(side="left", padx=10)
+        ttk.Button(actions_fr, text=tr("btn_test_conn", "Test Connection"), command=self._test_provider_connection).pack(side="left")
+        ttk.Button(actions_fr, text=tr("btn_apply_backend", "Apply Backend"), command=self._apply_provider_config, style="Accent.TButton").pack(side="left", padx=10)
         
-        ttk.Label(prov_tab, text="Note: API keys are stored securely in your OS Credential Manager (Windows Vault/Keychain).", 
+        ttk.Label(prov_tab, text=tr("msg_secure_storage", "Note: API keys are stored securely in your OS Credential Manager."), 
                   font=("Arial", 9, "italic"), foreground="gray", wraplength=500).pack(anchor="w", pady=10)
         
         # --- TAB 3: PROMPTS (Tuning) ---
         prompt_tab = ttk.Frame(self.notebook, padding="20")
         self.notebook.add(prompt_tab, text=tr("tab_prompts", "AI Prompts"))
         
-        ttk.Label(prompt_tab, text="Customize AI Behavior", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(prompt_tab, text=tr("lbl_customize_ai", "Customize AI Behavior"), font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
         
-        ttk.Label(prompt_tab, text="You can customize exactly how the AI defines words, explains grammar, grades your writing, and interacts in chat.", 
+        ttk.Label(prompt_tab, text=tr("lbl_customize_desc", "You can customize exactly how the AI defines words, explains grammar, grades your writing, and interacts in chat."), 
                   wraplength=500, justify="left").pack(anchor="w", pady=(0, 20))
         
-        ttk.Button(prompt_tab, text="🎨 Open Advanced Prompt Editor", 
+        ttk.Button(prompt_tab, text=tr("btn_open_prompt_editor", "🎨 Open Advanced Prompt Editor"), 
                    command=self.open_prompt_editor, style="Accent.TButton").pack(anchor="w", pady=10)
         
-        ttk.Button(prompt_tab, text="↺ Reset All Prompts to Default", 
+        ttk.Button(prompt_tab, text=tr("btn_reset_prompts", "↺ Reset All Prompts to Default"), 
                    command=self.reset_all_prompts).pack(anchor="w", pady=(0, 10))
         
-        ttk.Label(prompt_tab, text="Tip: Use the editor to add specific instructions for your target language or to change the tone of the AI tutor.", 
+        ttk.Label(prompt_tab, text=tr("tip_prompt_editor", "Tip: Use the editor to add specific instructions for your target language."), 
                   font=("Arial", 9, "italic"), foreground="gray", wraplength=500).pack(anchor="w", pady=20)
         
+        # --- TAB 3.5: DICTIONARIES ---
+        dict_tab = DictionarySettingsFrame(self.notebook)
+        self.notebook.add(dict_tab, text=tr("tab_dictionaries", "📚 Dictionaries"))
+
         # --- TAB 4: CLOUD SYNC ---
         sync_tab = ttk.Frame(self.notebook, padding="20")
-        self.notebook.add(sync_tab, text="☁️ Cloud Sync (Dropbox)")
+        self.notebook.add(sync_tab, text=tr("tab_cloud_sync", "☁️ Cloud Sync (Dropbox)"))
         
-        ttk.Label(sync_tab, text="Dropbox Sync", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
-        ttk.Label(sync_tab, text="Sync your data via your private App Folder.", 
+        ttk.Label(sync_tab, text=tr("lbl_dropbox_sync", "Dropbox Sync"), font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(sync_tab, text=tr("lbl_sync_description", "Sync your data via your private App Folder."), 
                   wraplength=500, justify="left").pack(anchor="w", pady=(0, 15))
         
         # Status indicator
         # self.sync_status_var = tk.StringVar(value="Not connected") # Moved to __init__
         status_frame = ttk.Frame(sync_tab)
         status_frame.pack(fill="x", pady=(0, 15))
-        ttk.Label(status_frame, text="Status:").pack(side="left")
+        ttk.Label(status_frame, text=tr("status_label", "Status:")).pack(side="left")
         ttk.Label(status_frame, textvariable=self.sync_status_var, font=("Arial", 10, "bold")).pack(side="left", padx=10)
         
         # Connect button
         connect_frame = ttk.Frame(sync_tab)
         connect_frame.pack(fill="x", pady=5)
-        ttk.Button(connect_frame, text="🔗 Connect Dropbox", 
+        ttk.Button(connect_frame, text=tr("btn_connect_dropbox", "🔗 Connect Dropbox"), 
                    command=self._open_dropbox_auth).pack(side="left")
-        ttk.Button(connect_frame, text="Unlink", 
+        ttk.Button(connect_frame, text=tr("btn_unlink", "Unlink"), 
                    command=self._disconnect_dropbox).pack(side="left", padx=10)
         
         # Sync actions
         ttk.Separator(sync_tab, orient="horizontal").pack(fill="x", pady=20)
-        ttk.Label(sync_tab, text="Manual Sync Actions", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(sync_tab, text=tr("lbl_manual_sync", "Manual Sync Actions"), font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 10))
         
         action_frame = ttk.Frame(sync_tab)
         action_frame.pack(fill="x", pady=10)
         
-        ttk.Button(action_frame, text="⬆️ Backup to Cloud", 
+        ttk.Button(action_frame, text=tr("btn_backup", "⬆️ Backup to Cloud"), 
                    command=self._backup_to_cloud, width=20).pack(side="left", padx=5)
-        ttk.Button(action_frame, text="⬇️ Restore from Cloud", 
+        ttk.Button(action_frame, text=tr("btn_restore", "⬇️ Restore from Cloud"), 
                    command=self._restore_from_cloud, width=20).pack(side="left", padx=5)
         
-        ttk.Label(sync_tab, text="⚠️ Backup will overwrite the cloud copy. Restore will merge changes.", 
+        ttk.Label(sync_tab, text=tr("msg_sync_warning", "⚠️ Backup will overwrite the cloud copy. Restore will merge changes."), 
                   font=("Arial", 9, "italic"), foreground="#CC5500", wraplength=500).pack(anchor="w", pady=15)
         
         # --- Safety & Checkpoints ---
         ttk.Separator(sync_tab, orient="horizontal").pack(fill="x", pady=20)
-        ttk.Label(sync_tab, text="Safety & Checkpoints", font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 10))
-        ttk.Label(sync_tab, text="Create a snapshot of your data before performing a manual sync to ensure you can revert if needed.", 
+        ttk.Label(sync_tab, text=tr("header_safety", "Safety & Checkpoints"), font=("Arial", 11, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(sync_tab, text=tr("lbl_safety_description", "Create a snapshot of your data before performing a manual sync to ensure you can revert if needed."), 
                   font=("Arial", 9), foreground="gray", wraplength=500).pack(anchor="w", pady=(0, 10))
         
         checkpoint_frame = ttk.Frame(sync_tab)
         checkpoint_frame.pack(fill="x", pady=5)
         
-        ttk.Button(checkpoint_frame, text="💾 Local Checkpoint", 
+        ttk.Button(checkpoint_frame, text=tr("btn_local_checkpoint", "Local Checkpoint"), 
                    command=lambda: self._create_checkpoint(cloud=False), width=20).pack(side="left", padx=5)
-        ttk.Button(checkpoint_frame, text="☁️ Cloud Checkpoint", 
+        ttk.Button(checkpoint_frame, text=tr("btn_cloud_checkpoint", "Cloud Checkpoint"), 
                    command=lambda: self._create_checkpoint(cloud=True), width=20).pack(side="left", padx=5)
         
-        ttk.Button(sync_tab, text="📂 Open Backup Folder", 
+        ttk.Button(sync_tab, text=tr("btn_open_backup", "📂 Open Backup Folder"), 
                    command=self._open_backup_folder, width=20).pack(anchor="w", padx=5, pady=10)
 
         ttk.Label(sync_tab, text=f"Config: {CONFIG_DIR}", 
@@ -231,14 +238,10 @@ class SettingsUI(ttk.Frame):
         ttk.Label(footer, text="Note: Some changes may require restarting the app.", font=("Arial", 9, "italic")).pack(side="left")
 
     def _switch_ui(self, lang_code):
+        # This will trigger observers including DashboardApp
         set_locale(lang_code)
         self.study_manager.set_ui_language(lang_code)
-        # Refresh the current frame
-        self.setup_ui()
-        self.load_settings()
-        # Also notify controller if it needs to refresh other parts (like title bars)
-        if hasattr(self.controller, 'root'):
-            self.controller.root.title(tr("app_title"))
+        # Note: DashboardApp will refresh this settings frame anyway
 
     def go_back(self):
         if hasattr(self.controller, 'show_home'):

@@ -461,6 +461,61 @@ def get_imported_stats():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 400
 
+
+@app.route('/api/sentences/score', methods=['POST'])
+def score_sentences():
+    """
+    Score sentence difficulty. Body: {"sentences": ["...", ...], "language": "en"}.
+    Returns list of {sentence, difficulty_score, confidence, category, bottleneck_word, unknown_count}.
+    """
+    try:
+        data = request.json or {}
+        sentences = data.get('sentences', [])
+        language = data.get('language', 'en')
+        if not sentences:
+            return jsonify({"success": False, "error": "sentences list required"}), 400
+        from src.services.text.tokenizer_service import TokenizerService
+        from src.services.text.sentence_difficulty import (
+            SentenceDifficultyScorer,
+            UserProfile,
+            make_tokenizer_adapter_from_tokenizer_service,
+            make_recall_provider_from_db,
+        )
+        from src.services.text.difficulty_resources import load_resource_bundle
+
+        tokenizer = TokenizerService()
+        adapter = make_tokenizer_adapter_from_tokenizer_service(tokenizer)
+        resources = load_resource_bundle(
+            language, db.db_path, load_frequency=True, load_graded=False, load_quantiles=False
+        )
+        profile = UserProfile(claimed_level="B1", language=language)
+        recall_provider = make_recall_provider_from_db(db)
+        scorer = SentenceDifficultyScorer(
+            tokenizer_adapter=adapter,
+            resources=resources,
+            user_profile=profile,
+            recall_provider=recall_provider,
+        )
+        results = scorer.score_batch(sentences, lang_code=language)
+        out = [
+            {
+                "sentence": r.sentence,
+                "difficulty_score": r.difficulty_score,
+                "confidence": r.confidence,
+                "category": r.difficulty_category,
+                "bottleneck_word": r.bottleneck_word,
+                "unknown_count": r.unknown_count,
+            }
+            for r in results
+        ]
+        return jsonify({"success": True, "scores": out})
+    except Exception as e:
+        print(f'[API] Error scoring sentences: {str(e)}', flush=True)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
 if __name__ == '__main__':
     print("Starting Language Learning Suite API Server...")
     print("API running on http://0.0.0.0:5000")

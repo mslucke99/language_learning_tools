@@ -11,6 +11,8 @@ class FlashcardDatabase:
         # This is safe for this application since we're not doing concurrent writes
         # isolation_level=None sets autocommit mode for immediate visibility across threads
         self.conn = sqlite3.connect(db_name, check_same_thread=False, isolation_level=None)
+        # Enable foreign key support (required for ON DELETE CASCADE)
+        self.conn.execute("PRAGMA foreign_keys = ON")
         self._create_tables()
 
     def _create_tables(self):
@@ -430,6 +432,41 @@ class FlashcardDatabase:
             print("[DB] Migrating sentence_explanations: adding suggestions column")
             cursor.execute("ALTER TABLE sentence_explanations ADD COLUMN suggestions TEXT")
 
+        # 7. Create known_words table for Sentence Mining
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS known_words (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lemma TEXT NOT NULL,
+                language TEXT NOT NULL,
+                source TEXT DEFAULT 'user',   -- 'frequency', 'flashcard', 'user', 'mining'
+                added_at TEXT NOT NULL,
+                UNIQUE(lemma, language)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_known_words_lang ON known_words(language)")
+
+        # 6. Create review_logs table for advanced statistics
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS review_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                flashcard_id INTEGER NOT NULL,
+                review_desc TEXT, -- 'flashcard', 'quiz', etc.
+                grade INTEGER, -- 0-5 (supermemo quality)
+                time_taken INTEGER, -- seconds
+                review_date TEXT NOT NULL,
+                FOREIGN KEY (flashcard_id) REFERENCES flashcards (id) ON DELETE CASCADE
+            )
+        """)
+
+        self.conn.commit()
+
+    def log_review(self, flashcard_id: int, grade: int, time_taken: int = 0, review_desc: str = 'flashcard'):
+        """Log a review event for statistics."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT INTO review_logs (flashcard_id, review_desc, grade, time_taken, review_date) VALUES (?, ?, ?, ?, ?)",
+            (flashcard_id, review_desc, grade, time_taken, datetime.now().isoformat())
+        )
         self.conn.commit()
 
     def create_collection(self, name: str, type: str, parent_id: int = None, language: str = None) -> int:
@@ -1253,6 +1290,75 @@ class FlashcardDatabase:
         if mobile_sync:
             cursor.execute("UPDATE sync_metadata SET last_mobile_sync = ? WHERE id = 1", (now,))
         
+        self.conn.commit()
+
+    # ===== KNOWN WORDS METHODS =====
+
+    def add_known_word(self, lemma: str, language: str, source: str = 'user') -> bool:
+        """Mark a single word as known."""
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(
+                "INSERT INTO known_words (lemma, language, source, added_at) VALUES (?, ?, ?, ?)",
+                (lemma.lower().strip(), language, source, datetime.now().isoformat())
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def add_known_words_bulk(self, lemmas: list[str], language: str, source: str = 'user') -> int:
+        """Mark multiple words as known efficiently."""
+        if not lemmas:
+            return 0
+        
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+        data = [(lemma.lower().strip(), language, source, now) for lemma in lemmas]
+        
+        cursor.executemany(
+            "INSERT OR IGNORE INTO known_words (lemma, language, source, added_at) VALUES (?, ?, ?, ?)",
+            data
+        )
+        self.conn.commit()
+        return cursor.rowcount
+
+    def is_word_known(self, lemma: str, language: str) -> bool:
+        """Check if a word is known."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM known_words WHERE lemma = ? AND language = ?",
+            (lemma.lower().strip(), language)
+        )
+        return cursor.fetchone() is not None
+
+    def get_known_word_count(self, language: str) -> int:
+        """Get total known words for a language."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM known_words WHERE language = ?", (language,))
+        return cursor.fetchone()[0]
+
+    def get_all_known_words(self, language: str) -> list[dict]:
+        """Get all known words for a language."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT id, lemma, source, added_at FROM known_words WHERE language = ? ORDER BY lemma",
+            (language,)
+        )
+        return [{"id": r[0], "lemma": r[1], "source": r[2], "added_at": r[3]} for r in cursor.fetchall()]
+
+    def get_user_recall_data(self, language: str) -> Dict[str, float]:
+        """
+        Return lemma -> recall probability (0-1) for sentence difficulty scoring.
+        Phase 1/Option A: known_words -> 1.0. Phase 2 can add flashcard-derived recall.
+        """
+        words = self.get_all_known_words(language)
+        return {w["lemma"].lower(): 1.0 for w in words}
+
+    def delete_known_word(self, word_id: int):
+        """Remove a word from known words."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM known_words WHERE id = ?", (word_id,))
         self.conn.commit()
 
     def close(self):

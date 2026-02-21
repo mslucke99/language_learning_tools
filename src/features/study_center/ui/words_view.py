@@ -5,6 +5,7 @@ from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header, bind_mousewheel
 from src.core.ui.related_items_panel import RelatedItemsPanel
 from src.features.study_center.ui.dialogs import ManageCollectionsDialog, MoveItemDialog
+from src.core.localization import tr
 
 class WordsViewFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, db: FlashcardDatabase, embedded=False):
@@ -52,7 +53,7 @@ class WordsViewFrame(ttk.Frame):
         left_pane = ttk.Frame(paned_window)
         paned_window.add(left_pane, weight=1)
         
-        ttk.Label(left_pane, text="Folders & Words", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        ttk.Label(left_pane, text=tr("lbl_folders_words", "Folders & Words"), font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 5))
         
         # Search & Status controls
         ctrl_frame = ttk.Frame(left_pane)
@@ -65,9 +66,11 @@ class WordsViewFrame(ttk.Frame):
         
         status_frame = ttk.Frame(ctrl_frame)
         status_frame.pack(fill="x")
-        ttk.Label(status_frame, text="Status:").pack(side="left")
-        self.word_status_var = tk.StringVar(value="All")
-        status_filter = ttk.Combobox(status_frame, textvariable=self.word_status_var, values=["All", "Processed", "Unprocessed"], state="readonly", width=12)
+        ttk.Label(status_frame, text=tr("status_label", "Status:")).pack(side="left")
+        self.word_status_var = tk.StringVar(value=tr("cat_all", "All"))
+        status_filter = ttk.Combobox(status_frame, textvariable=self.word_status_var, 
+                                     values=[tr("cat_all", "All"), tr("cat_processed", "Processed"), tr("cat_unprocessed", "Unprocessed")], 
+                                     state="readonly", width=12)
         status_filter.pack(side="left", padx=5)
         status_filter.bind("<<ComboboxSelected>>", lambda e: self._update_words_view())
         
@@ -86,10 +89,10 @@ class WordsViewFrame(ttk.Frame):
         # Action Buttons below Tree
         tree_btns = ttk.Frame(left_pane)
         tree_btns.pack(fill="x", pady=5)
-        ttk.Button(tree_btns, text="📁 New Folder", command=lambda: self._manage_study_colls('word')).pack(side="left", padx=2, fill="x", expand=True)
-        ttk.Button(tree_btns, text="📂 Move Item", command=lambda: self._move_item_to_coll('word')).pack(side="left", padx=2, fill="x", expand=True)
-        ttk.Button(tree_btns, text="📤 Export JSON", command=lambda: self._export_study_items('word')).pack(side="left", padx=2, fill="x", expand=True)
-        ttk.Button(tree_btns, text="🔄 Refresh", command=self._refresh_data_manual).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text=tr("btn_new_folder", "📁 New Folder"), command=lambda: self._manage_study_colls('word')).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text=tr("btn_move_item", "📂 Move Item"), command=lambda: self._move_item_to_coll('word')).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text=tr("btn_export_json", "📤 Export JSON"), command=lambda: self._export_study_items('word')).pack(side="left", padx=2, fill="x", expand=True)
+        ttk.Button(tree_btns, text=tr("btn_refresh", "🔄 Refresh"), command=self._refresh_data_manual).pack(side="left", padx=2, fill="x", expand=True)
         
         # RIGHT PANE: Detail & Editor
         right_pane = ttk.Frame(paned_window, padding=(10, 0, 0, 0))
@@ -122,6 +125,7 @@ class WordsViewFrame(ttk.Frame):
             ttk.Button(ai_action_frame, text="📋 Generate Definition", command=lambda: self._generate_word_content('definition')).pack(side="left", padx=2)
             ttk.Button(ai_action_frame, text="📝 Generate Explanation", command=lambda: self._generate_word_content('explanation')).pack(side="left", padx=2)
         ttk.Button(ai_action_frame, text="Save", command=self._save_word_definition).pack(side="right")
+        ttk.Button(ai_action_frame, text="Delete", command=self._delete_word).pack(side="right", padx=5)
         
         # TAB 2: Examples & Notes
         tab_notes = ttk.Frame(self.notebook, padding="10")
@@ -165,6 +169,10 @@ class WordsViewFrame(ttk.Frame):
             self.controller.show_study_dashboard()
 
     def _update_words_view(self):
+        # Preservation logic
+        scroll_pos = self.words_tree.yview()
+        selected_iid = self.words_tree.selection()
+        
         search_query = self.word_search_var.get().lower().strip()
         status_filter = self.word_status_var.get()
         
@@ -203,7 +211,7 @@ class WordsViewFrame(ttk.Frame):
                 remaining.pop(i)
         
         for c in remaining: self.words_tree.insert("", "end", iid=f"coll_{c['id']}", text=f"📁 {c['name']}", open=True)
-
+ 
         # Insert Words
         uncategorized_node = None
         for w in filtered_words:
@@ -214,6 +222,16 @@ class WordsViewFrame(ttk.Frame):
                 parent = uncategorized_node
             status = "✓" if w['has_definition'] else "○"
             self.words_tree.insert(parent, "end", iid=f"word_{w['id']}", text=f"{status} {w['word']}")
+
+        # Restore
+        try:
+            self.words_tree.yview_moveto(scroll_pos[0])
+            if selected_iid:
+                # Check if selected iid still exists
+                if self.words_tree.exists(selected_iid[0]):
+                    self.words_tree.selection_set(selected_iid[0])
+                    self.words_tree.see(selected_iid[0])
+        except: pass
 
     def _on_word_selected(self, event):
         selection = self.words_tree.selection()
@@ -303,7 +321,7 @@ class WordsViewFrame(ttk.Frame):
                  self._handle_completed_task(task_id, status)
                  
         for task_id in completed_tasks:
-            del self.active_tasks[task_id]
+            self.active_tasks.pop(task_id, None)
             
         self.after(1000, self._check_queue_status)
 
@@ -374,6 +392,34 @@ class WordsViewFrame(ttk.Frame):
     def _refresh_data_manual(self):
         self.words_data = self.study_manager.get_imported_words()
         self._update_words_view()
+
+    def _delete_word(self):
+        if not self.current_word_id:
+            return
+
+        if messagebox.askyesno(tr("lbl_confirm_delete", "Confirm Delete"), tr("msg_confirm_delete_prompt", "Are you sure you want to delete this item?")):
+            if self.study_manager.delete_word(self.current_word_id):
+                messagebox.showinfo(tr("msg_success", "Success"), tr("msg_deleted", "Item deleted."))
+                self.words_data = self.study_manager.get_imported_words()
+                self._update_words_view()
+                self.current_word_id = None
+                self.word_label.config(text="(Select a word)")
+                self.word_definition_text.delete(1.0, tk.END)
+                self.word_examples_text.delete(1.0, tk.END)
+                self.word_notes_text.delete(1.0, tk.END)
+            else:
+                messagebox.showerror(tr("msg_error", "Error"), tr("msg_delete_failed", "Failed to delete item."))
+
+    def on_show(self):
+        """Lifecycle hook: Refresh data and resume polling."""
+        self._refresh_data_manual()
+        self._check_queue_status()
+
+    def on_hide(self):
+        """Lifecycle hook: Pause polling if needed."""
+        # Polling uses after(), so we could cancel it if we stored the id
+        # For now, it will just run once more and stop if winfo_viewable is checked
+        pass
 
     # _populate_suggestions and _add_suggestion moved to RelatedItemsPanel component
     # Tab switch is handled in _handle_completed_task above

@@ -103,3 +103,4 @@ planned-features.txt
 *.swo
 *.tmp
 *.log
+test_data/
