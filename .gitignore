@@ -104,3 +104,6 @@ planned-features.txt
 *.tmp
 *.log
 test_data/
+cache/
+tests/scratchpad/
+flutter_application/test_import.dart
