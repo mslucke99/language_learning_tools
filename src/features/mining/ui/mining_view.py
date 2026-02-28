@@ -19,6 +19,8 @@ from src.services.text.difficulty_categories import CATEGORIES as DIFF_CATEGORIE
 from src.services.text.vocab_calibration import VocabCalibrationService
 from src.features.mining.ui.calibration_dialog import CalibrationDialog
 from src.features.mining.ui.known_words_view import KnownWordsView
+from src.features.chat.ui.scenario_editor import ScenarioEditorDialog
+
 
 from src.features.study_center.logic.study_manager import StudyManager
 
@@ -177,6 +179,9 @@ class SentenceMiningView(ttk.Frame):
         
         self.btn_add_sentence = ttk.Button(self.detail_frame, text="📖 Add to Study Center", state="disabled", command=self.add_sentence_to_study)
         self.btn_add_sentence.pack(pady=5, fill="x", padx=5)
+
+        self.btn_use_for_chat = ttk.Button(self.detail_frame, text="💬 Use for Chat", state="disabled", command=self.use_sentence_for_chat)
+        self.btn_use_for_chat.pack(pady=5, fill="x", padx=5)
 
     def open_manager(self):
         # If already open, just bring to front
@@ -394,6 +399,7 @@ class SentenceMiningView(ttk.Frame):
 
             self.lbl_detail.config(state="disabled")
             self.btn_add_sentence.config(state="normal" if s.level > 0 else "disabled")
+            self.btn_use_for_chat.config(state="normal")
 
     def on_unknown_select(self, event):
         sel = self.tree_unknown.selection()
@@ -457,3 +463,34 @@ class SentenceMiningView(ttk.Frame):
             messagebox.showinfo("Success", "Sentence added to Study Center (Sentences tab)")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to add sentence: {e}")
+
+    def use_sentence_for_chat(self):
+        if not self.selected_sentence: return
+        
+        sentence_text = self.selected_sentence.text
+        
+        # Create a selection dialog
+        dialog = tk.Toplevel(self)
+        dialog.title("Use for Chat")
+        dialog.geometry("300x150")
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text="Use this sentence for:", padding=10).pack()
+        
+        def start_topical():
+            dialog.destroy()
+            topic = tk.simpledialog.askstring("Chat Topic", "Enter a topic for this conversation:", parent=self)
+            if topic:
+                full_topic = f"{topic} (Context: {sentence_text})"
+                session_id = self.study_manager.create_chat_session(full_topic)
+                messagebox.showinfo("Success", f"Chat created: '{topic}'\nGo to the Chat tab to start!")
+        
+        def start_roleplay():
+            dialog.destroy()
+            ScenarioEditorDialog(self, self.study_manager, context_text=sentence_text)
+            
+        ttk.Button(dialog, text="Topical Chat", command=start_topical).pack(fill="x", padx=20, pady=5)
+        ttk.Button(dialog, text="Role-Play Scenario", command=start_roleplay).pack(fill="x", padx=20, pady=5)
+        ttk.Button(dialog, text="Cancel", command=dialog.destroy).pack(fill="x", padx=20, pady=5)
+

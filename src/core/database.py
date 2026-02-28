@@ -3,10 +3,11 @@ import uuid
 from src.features.flashcards.logic.flashcard import Flashcard
 from datetime import datetime
 from typing import Optional, List, Dict
+from src.core.config import config as app_config
 
 class FlashcardDatabase:
-    def __init__(self, db_name="flashcards.db"):
-        self.db_path = db_name
+    def __init__(self, db_name=None):
+        self.db_path = db_name or app_config.db_path
         # check_same_thread=False allows the connection to be used across Flask request threads
         # This is safe for this application since we're not doing concurrent writes
         # isolation_level=None sets autocommit mode for immediate visibility across threads

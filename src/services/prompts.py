@@ -364,7 +364,8 @@ ROLEPLAY_PROMPTS = {
             '  ]\n'
             '}}\n\n'
             'The scenario should be tailored for a student whose native language is {native_language}. '
-            'Include 1 or 2 interesting AI characters.'
+            'Include 1 or 2 interesting AI characters.\n\n'
+            '{context_instruction}'
         ),
     }
 }

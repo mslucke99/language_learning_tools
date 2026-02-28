@@ -5,7 +5,18 @@
 
 const API_URL = 'http://localhost:5000/api';
 
-// Store selected content
+/**
+ * @typedef {Object} SelectedContent
+ * @property {string} text - Selected text content
+ * @property {string} type - Type of content: 'word' or 'sentence'
+ * @property {string} title - Page title
+ * @property {string} url - Current URL
+ */
+
+/**
+ * Store selected content
+ * @type {SelectedContent}
+ */
 let selectedContent = {
   text: '',
   type: '', // 'word' or 'sentence'
@@ -41,6 +52,10 @@ document.addEventListener('mouseup', function() {
 });
 
 // Show import options (Word or Sentence)
+/**
+ * Display import option buttons above selected text
+ * @returns {void}
+ */
 function showImportOptions() {
   // Remove existing buttons
   const existing = document.getElementById('import-options-container');
@@ -119,6 +134,11 @@ function showImportOptions() {
 }
 
 // Import content as specific type
+/**
+ * Handle import request for selected content as specific type
+ * @param {string} type - Type of content: 'word' or 'sentence'
+ * @returns {void}
+ */
 function importAsType(type) {
   const container = document.getElementById('import-options-container');
   if (container) container.remove();
@@ -150,6 +170,12 @@ function importAsType(type) {
 }
 
 // Simple notification system
+/**
+ * Display a toast notification message
+ * @param {string} message - The message to display
+ * @param {boolean} [isError=false] - Whether this is an error notification
+ * @returns {void}
+ */
 function showNotification(message, isError = false) {
   const notification = document.createElement('div');
   notification.textContent = message;

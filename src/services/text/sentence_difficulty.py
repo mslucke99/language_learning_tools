@@ -4,7 +4,7 @@ sentence structure, and optional SRS/recall data. Integrates with SentenceMiner.
 """
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Callable, Tuple, Any
+from typing import Dict, List, Optional, Callable, Tuple, Any, TYPE_CHECKING
 
 from src.services.text.difficulty_resources import (
     ResourceBundle,
@@ -13,6 +13,10 @@ from src.services.text.difficulty_resources import (
     GradedList,
 )
 from src.services.text.difficulty_categories import score_to_category
+
+if TYPE_CHECKING:
+    from src.services.text.tokenizer_service import TokenizerService
+    from src.core.database import FlashcardDatabase
 
 
 # Tokenizer adapter: (text: str, lang_code: str) -> List[str] (lemmas)
@@ -388,7 +392,7 @@ class SentenceDifficultyScorer:
         )
 
 
-def make_tokenizer_adapter_from_tokenizer_service(tokenizer_service: Any) -> TokenizerAdapter:
+def make_tokenizer_adapter_from_tokenizer_service(tokenizer_service: "TokenizerService") -> TokenizerAdapter:
     """
     Build a TokenizerAdapter from the project's TokenizerService.
     Returns (text, lang_code) -> list of lemma strings.
@@ -399,7 +403,7 @@ def make_tokenizer_adapter_from_tokenizer_service(tokenizer_service: Any) -> Tok
     return adapter
 
 
-def make_recall_provider_from_db(db: Any) -> RecallProvider:
+def make_recall_provider_from_db(db: "FlashcardDatabase") -> RecallProvider:
     """
     Build a recall provider from FlashcardDatabase: known_words -> 1.0, others imputed.
     Uses db.get_user_recall_data(lang_code) when available.

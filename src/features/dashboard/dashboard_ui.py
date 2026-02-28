@@ -5,6 +5,7 @@ from src.services.llm_service import get_ai_client, is_ai_available
 from src.features.study_center.logic.study_manager import StudyManager
 from src.core.import_export import ImportExportManager
 from src.core.localization import tr, set_locale, subscribe_locale
+from src.core.config import config as app_config
 
 # Import Feature Views
 from src.features.flashcards.ui.deck_selection import DeckSelectionFrame
@@ -28,6 +29,7 @@ from src.features.dashboard.dev_console_ui import DevConsoleDialog
 # from src.services.dropbox_sync import dropbox_manager # Removing Dropbox ref
 from src.services.auth_service import AuthService
 from src.services.firestore_sync import FirestoreSyncManager
+from src.core.pending_imports import PendingImportsProcessor
 
 class DashboardApp:
     def __init__(self, root):
@@ -103,6 +105,9 @@ class DashboardApp:
         
         # Bind Global Shortcuts
         self.bind_global_shortcuts()
+        
+        # Process any pending imports from browser extension (offline buffer)
+        self._process_pending_imports()
         
     def bind_global_shortcuts(self):
         """Bind global navigation shortcuts."""
@@ -258,6 +263,24 @@ class DashboardApp:
         
     def show_grammar_help(self):
         self.show_grammar_book_view()
+
+    def _process_pending_imports(self):
+        """Check for and process any pending imports from the browser extension."""
+        def _run_process():
+            try:
+                processor = PendingImportsProcessor(self.db)
+                results = processor.process()
+                if results['processed'] > 0:
+                    msg = tr("msg_imported_items", "📥 Imported {count} items from browser extension", count=results['processed'])
+                    # We can't easily show a transient message in the status bar from a thread without more logic
+                    # For now, let's just log it or show a message box if it's significant
+                    print(f"[Dashboard] {msg}")
+                    self.root.after(1000, lambda: messagebox.showinfo(tr("title_import", "Imports Found"), msg))
+            except Exception as e:
+                print(f"[Dashboard] Error processing pending imports: {e}")
+
+        import threading
+        threading.Thread(target=_run_process, daemon=True).start()
 
     # --- Status Bar & Task Queue ---
 

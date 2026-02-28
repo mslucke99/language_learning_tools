@@ -6,10 +6,11 @@ from src.core.localization import tr
 
 
 class ScenarioEditorDialog(tk.Toplevel):
-    def __init__(self, parent, study_manager: StudyManager, scenario_id: int = None):
+    def __init__(self, parent, study_manager: StudyManager, scenario_id: int = None, context_text: str = None):
         super().__init__(parent)
         self.study_manager = study_manager
         self.scenario_id = scenario_id
+        self.context_text = context_text
         self.result = None
         
         self.title(tr("title_scenario_editor", "Role-Play Scenario Editor"))
@@ -269,7 +270,8 @@ class ScenarioEditorDialog(tk.Toplevel):
         self.active_task_id = self.study_manager.queue_generation_task(
             'generate_roleplay_scenario',
             0,
-            scenario_type=scenario_type
+            scenario_type=scenario_type,
+            context_text=self.context_text
         )
         self._poll_generation()
 

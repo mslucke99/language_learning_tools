@@ -7,7 +7,9 @@
     "contextMenus",
     "storage",
     "scripting",
-    "activeTab"
+    "activeTab",
+    "downloads",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -17,9 +19,15 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "css": ["styles.css"]
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ]
     }
   ],
   "action": {

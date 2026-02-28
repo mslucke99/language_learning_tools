@@ -2,6 +2,7 @@ import sys
 import os
 import tkinter as tk
 from tkinter import messagebox
+from typing import NoReturn
 
 # Ensure src is in path if run from language_learning_tools root
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -17,7 +18,7 @@ except ImportError as e:
         print("Please run from the repository root, e.g., 'python3 src/main.py'")
         sys.exit(1)
 
-def main():
+def main() -> None:
     try:
         root = tk.Tk()
         app = DashboardApp(root)

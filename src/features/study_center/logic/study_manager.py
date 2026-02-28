@@ -20,6 +20,8 @@ from typing import Optional, List, Dict, Tuple
 from src.core.database import FlashcardDatabase
 from src.services.llm_service import OllamaClient, OllamaThreadedQuery
 from src.services.prompts import WORD_PROMPTS, SENTENCE_PROMPTS, WRITING_PROMPTS, CHAT_PROMPTS, PRACTICE_PROMPTS, ROLEPLAY_PROMPTS
+from src.core.config import config as app_config
+from src.core.preferences import UserPreferences
 
 
 class StudyManager:
@@ -35,22 +37,33 @@ class StudyManager:
         """
         self.db = db
         self.ai_client = ai_client
+        self.prefs = UserPreferences(self.db)
     
-        # Load LLM Provider configuration
+        # Migration: Sync legacy DB config to AppConfig if needed
         self._load_llm_config()
     
-        # Get user preferences
-        self.native_language = self._get_setting('native_language', 'English')
-        self.study_language = self._get_setting('study_language', 'Spanish')
-        self.ui_language = self._get_setting('ui_language', 'en')
-        self.prefer_native_definitions = self._get_setting('prefer_native_definitions', 'true') == 'true'
-        self.prefer_native_explanations = self._get_setting('prefer_native_explanations', 'false') == 'true'
-        self.request_timeout = int(self._get_setting('request_timeout', '120'))
-        self.preload_on_startup = self._get_setting('preload_on_startup', 'true') == 'true'
+        # Load configuration from central AppConfig
+        self.llm_provider = app_config.llm_provider
+        self.llm_base_url = app_config.llm_base_url
+        self.llm_model = app_config.llm_model
     
-        # Ensure client uses the configured model
-        if self.ai_client and self.llm_model:
-            self.ai_client.set_model(self.llm_model)
+        # Get user preferences via UserPreferences interface
+        self.native_language = self.prefs.native_language
+        self.study_language = self.prefs.study_language
+        self.ui_language = self.prefs.ui_language
+        self.prefer_native_definitions = self.prefs.get('prefer_native_definitions', 'true') == 'true'
+        self.prefer_native_explanations = self.prefs.get('prefer_native_explanations', 'false') == 'true'
+        
+        # App-level config from AppConfig
+        self.request_timeout = app_config.request_timeout
+        self.preload_on_startup = app_config.preload_on_startup
+    
+        # Ensure client matches config via factory
+        from src.services.llm_service import get_ai_client
+        self.ai_client = get_ai_client(self.llm_provider, {
+            "base_url": self.llm_base_url,
+            "model": self.llm_model
+        })
             
         # Background Task Queue Setup
         self.task_queue = queue.Queue()
@@ -127,27 +140,26 @@ class StudyManager:
         return model
 
     def _load_llm_config(self):
-        """Load the active LLM provider configuration."""
-        cursor = self.db.conn.cursor()
-        cursor.execute("SELECT provider, base_url, default_model FROM llm_config WHERE is_active = 1")
-        row = cursor.fetchone()
-        
-        if row:
-            self.llm_provider = row[0]
-            self.llm_base_url = row[1]
-            self.llm_model = self._validate_model_compatibility(self.llm_provider, row[2])
-        else:
-            # Default to Gemini if nothing configured/active (Better default than Ollama for new users)
-            self.llm_provider = "gemini"
-            self.llm_base_url = ""
-            self.llm_model = "gemini-1.5-flash"
+        """Migrate legacy LLM config from DB to AppConfig if present."""
+        try:
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT provider, base_url, default_model FROM llm_config WHERE is_active = 1")
+            row = cursor.fetchone()
             
-        # Ensure client matches active config
-        from src.services.llm_service import get_ai_client
-        self.ai_client = get_ai_client(self.llm_provider, {
-            "base_url": self.llm_base_url,
-            "model": self.llm_model
-        })
+            if row:
+                # Migration: if we found an active config in DB, sync it to AppConfig once
+                changed = False
+                if app_config.llm_provider == "gemini": # Likely default
+                     app_config.llm_provider = row[0]
+                     app_config.llm_base_url = row[1]
+                     app_config.llm_model = row[2]
+                     changed = True
+                
+                if changed:
+                    print(f"[Config] Migrated legacy DB config for provider: {row[0]}")
+                    app_config.save_to_file()
+        except:
+            pass # DB might not be initialized or table might not exist in early init
 
     def _get_effective_prompt(self, category: str, prompt_id: str, template_type: str = 'template') -> str:
         """Internal helper to get the prompt to use for generation."""
@@ -163,22 +175,25 @@ class StudyManager:
 
     def update_llm_config(self, provider: str, model: str, base_url: str = None):
         """Update and activate an LLM provider configuration."""
-        cursor = self.db.conn.cursor()
+        # 1. Update AppConfig and persist
+        app_config.llm_provider = provider
+        app_config.llm_model = self._validate_model_compatibility(provider, model)
+        app_config.llm_base_url = base_url or ""
+        app_config.save_to_file()
         
-        # Deactivate all
+        # 2. Legacy DB update
+        cursor = self.db.conn.cursor()
         cursor.execute("UPDATE llm_config SET is_active = 0")
         
-        # Logic Fix: If switching providers and model is obviously mismatching, 
-        # use a sensible default for that provider.
+        # ... logic for sensible defaults ...
         if model:
             if provider == "gemini" and not model.lower().startswith("gemini"):
                 model = "gemini-1.5-flash"
             elif provider == "openai" and not (model.lower().startswith("gpt") or model.lower().startswith("o1") or model.lower().startswith("o3")):
                 model = "gpt-4o-mini"
             elif provider == "ollama" and ("gpt" in model.lower() or "gemini" in model.lower()):
-                model = "" # Ollama will use default or discover
+                model = ""
         
-        # Check if provider exists
         cursor.execute("SELECT id FROM llm_config WHERE provider = ?", (provider,))
         row = cursor.fetchone()
         
@@ -194,7 +209,18 @@ class StudyManager:
             )
             
         self.db.conn.commit()
-        self._load_llm_config()
+        
+        # 3. Re-load from AppConfig (to ensure sync)
+        self.llm_provider = app_config.llm_provider
+        self.llm_model = app_config.llm_model
+        self.llm_base_url = app_config.llm_base_url
+        
+        # 4. Update the client
+        from src.services.llm_service import get_ai_client
+        self.ai_client = get_ai_client(self.llm_provider, {
+            "base_url": self.llm_base_url,
+            "model": self.llm_model
+        })
 
     def get_provider_config(self, provider: str) -> dict:
         """Get the saved configuration for a specific provider."""
@@ -383,7 +409,10 @@ class StudyManager:
                         kwargs['current_history'] = []
                     success, result, suggestions = self.send_chat_message(**kwargs)
                 elif task_type == 'generate_roleplay_scenario':
-                    success, result = self.generate_roleplay_scenario(kwargs.get('scenario_type'))
+                    success, result = self.generate_roleplay_scenario(
+                        kwargs.get('scenario_type'), 
+                        context_text=kwargs.get('context_text')
+                    )
                     suggestions = {}
                 else:
                     success, result, suggestions = False, "Unknown task type", {}
@@ -438,6 +467,11 @@ class StudyManager:
     
     def _get_setting(self, key: str, default: str = '') -> str:
         """Get a study setting value."""
+        # App-level settings should now be in AppConfig
+        if key in ['request_timeout', 'preload_on_startup', 'ollama_model']:
+            import warnings
+            warnings.warn(f"Setting '{key}' is deprecated in DB. Use src.core.config instead.", DeprecationWarning)
+            
         cursor = self.db.conn.cursor()
         cursor.execute("SELECT setting_value FROM study_settings WHERE setting_key = ?", (key,))
         result = cursor.fetchone()
@@ -454,17 +488,16 @@ class StudyManager:
     
     def set_native_language(self, language: str):
         """Set the user's native language."""
-        self._set_setting('native_language', language)
+        self.prefs.native_language = language
         self.native_language = language
-
     def set_ui_language(self, lang_code: str):
         """Set the UI locale (en, ko, etc)."""
-        self._set_setting('ui_language', lang_code)
+        self.prefs.ui_language = lang_code
         self.ui_language = lang_code
     
     def set_study_language(self, language: str):
         """Set the language being studied."""
-        self._set_setting('study_language', language)
+        self.prefs.study_language = language
         self.study_language = language
 
     def get_study_language_code(self) -> str:
@@ -491,28 +524,34 @@ class StudyManager:
     
     def set_request_timeout(self, timeout: int):
         """Set the request timeout in seconds."""
+        # Update AppConfig and persist
+        app_config.request_timeout = timeout
+        app_config.save_to_file()
+        
+        # Legacy DB update for backward compatibility (will trigger warning)
         self._set_setting('request_timeout', str(timeout))
         self.request_timeout = timeout
-    
     def get_request_timeout(self) -> int:
         """Get the current request timeout in seconds."""
         return self.request_timeout
     
     def set_ollama_model(self, model: str):
         """Legacy setter for the current model."""
+        import warnings
+        warnings.warn("set_ollama_model is deprecated. Update src.core.config.config.llm_model instead.", DeprecationWarning)
         self.set_llm_model(model)
         
     def set_llm_model(self, model: str):
         """Set the current AI model."""
         self.llm_model = model
         
-        # 1. Update legacy setting for backward compatibility
-        self._set_setting('ollama_model', model)
+        # 1. Update AppConfig and persist
+        app_config.llm_model = model
+        app_config.save_to_file()
         
-        # 2. Update active provider's config in DB
-        cursor = self.db.conn.cursor()
-        cursor.execute("UPDATE llm_config SET default_model = ? WHERE provider = ?", (model, self.llm_provider))
-        self.db.conn.commit()
+        # 2. Update legacy setting for backward compatibility
+        self._set_setting('ollama_model', model)
+        self._set_setting('llm_model', model) # Track both legacy keys
         
         # 3. Update the client if available
         if self.ai_client:
@@ -524,6 +563,10 @@ class StudyManager:
 
     def set_preload_on_startup(self, enabled: bool):
         """Set whether to pre-load the model on app startup."""
+        # Update AppConfig and persist
+        app_config.preload_on_startup = enabled
+        app_config.save_to_file()
+        
         self._set_setting('preload_on_startup', 'true' if enabled else 'false')
         self.preload_on_startup = enabled
         
@@ -1640,12 +1683,13 @@ Any important exceptions or nuances.
         """Delete a roleplay scenario."""
         return self.db.delete_roleplay_scenario(scenario_id)
 
-    def generate_roleplay_scenario(self, scenario_type: str) -> Tuple[bool, Dict]:
+    def generate_roleplay_scenario(self, scenario_type: str, context_text: str = None) -> Tuple[bool, Dict]:
         """
         Generate a roleplay scenario using AI.
         
         Args:
             scenario_type: The type of scenario (e.g., 'Everyday Life', 'Fantasy')
+            context_text: Optional sentence context to incorporate
             
         Returns:
             Tuple of (success: bool, scenario_data: Dict)
@@ -1653,11 +1697,16 @@ Any important exceptions or nuances.
         if not self.ai_client or not self.ai_client.is_available():
             return False, {"error": "AI service is not available"}
             
+        context_instruction = ""
+        if context_text:
+            context_instruction = f"IMPORTANT: This scenario should be built around or heavily feature this specific context: \"{context_text}\""
+
         prompt_template = self._get_effective_prompt('roleplay', 'generate_scenario')
         prompt = prompt_template.format(
             study_language=self.study_language,
             native_language=self.native_language,
-            scenario_type=scenario_type
+            scenario_type=scenario_type,
+            context_instruction=context_instruction
         )
         
         start_time = time.time()

@@ -97,6 +97,10 @@
         <div class="status-bar">
             <span class="status-indicator offline" id="api-status"></span>
             <span id="api-status-text">Checking...</span>
+            <div id="queue-status" style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+                <span id="queue-count" style="font-weight: bold; color: #666;"></span>
+                <button id="manual-sync-btn" style="padding: 4px 8px; font-size: 11px; display: none; background: #E9E9EB; color: #333;">💾 Sync to File</button>
+            </div>
         </div>
 
         <!-- Error Box -->

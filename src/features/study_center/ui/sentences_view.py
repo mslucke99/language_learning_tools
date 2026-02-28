@@ -5,6 +5,7 @@ from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header, bind_mousewheel
 from src.core.ui.related_items_panel import RelatedItemsPanel
 from src.features.study_center.ui.dialogs import ManageCollectionsDialog, MoveItemDialog
+from src.features.chat.ui.scenario_editor import ScenarioEditorDialog
 from src.core.localization import tr
 
 class SentencesViewFrame(ttk.Frame):
@@ -98,6 +99,8 @@ class SentencesViewFrame(ttk.Frame):
         ttk.Button(sentence_btn_frame, text="✏️ Edit", command=self._toggle_edit_sentence).pack(side="left", padx=2)
         ttk.Button(sentence_btn_frame, text="💾 Save Sentence", command=self._save_sentence_text).pack(side="left", padx=2)
         ttk.Button(sentence_btn_frame, text="⟲ Reset", command=self._reset_sentence_text).pack(side="left", padx=2)
+        ttk.Button(sentence_btn_frame, text="💬 Use for Chat", command=self._use_sentence_for_chat).pack(side="left", padx=2)
+
         
         self.notebook = ttk.Notebook(right_pane)
         self.notebook.pack(fill="both", expand=True)
@@ -493,6 +496,38 @@ class SentencesViewFrame(ttk.Frame):
     def _refresh_data_manual(self):
         self.sentences_data = self.study_manager.get_imported_sentences()
         self._update_sentences_view()
+
+    def _use_sentence_for_chat(self):
+        if not self.current_sentence_id or not self.original_sentence_text:
+            messagebox.showwarning("Warning", "Please select a sentence first")
+            return
+        
+        sentence_text = self.original_sentence_text
+        
+        # Create a selection dialog
+        dialog = tk.Toplevel(self)
+        dialog.title("Use for Chat")
+        dialog.geometry("300x150")
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text="Use this sentence for:", padding=10).pack()
+        
+        def start_topical():
+            dialog.destroy()
+            topic = tk.simpledialog.askstring("Chat Topic", "Enter a topic for this conversation:", parent=self)
+            if topic:
+                full_topic = f"{topic} (Context: {sentence_text})"
+                session_id = self.study_manager.create_chat_session(full_topic)
+                messagebox.showinfo("Success", f"Chat created: '{topic}'\nGo to the Chat tab to start!")
+        
+        def start_roleplay():
+            dialog.destroy()
+            ScenarioEditorDialog(self, self.study_manager, context_text=sentence_text)
+            
+        ttk.Button(dialog, text="Topical Chat", command=start_topical).pack(fill="x", padx=20, pady=5)
+        ttk.Button(dialog, text="Role-Play Scenario", command=start_roleplay).pack(fill="x", padx=20, pady=5)
+        ttk.Button(dialog, text="Cancel", command=dialog.destroy).pack(fill="x", padx=20, pady=5)
 
     def _delete_sentence(self):
         if not self.current_sentence_id:

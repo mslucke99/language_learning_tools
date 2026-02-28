@@ -12,13 +12,17 @@ from src.services.llm_providers.ollama_provider import OllamaProvider
 from src.services.llm_providers.openai_compatible import OpenAICompatibleProvider
 from src.services.llm_providers.gemini_provider import GeminiProvider
 from src.services.llm_providers.security import KeyringManager
+from src.core.config import config as app_config
 
 class LLMService:
     """Unified service for AI-powered language learning assistance."""
     
-    def __init__(self, provider_type: str = "ollama", config: Dict = None):
-        self.provider_type = provider_type
-        self.config = config or {}
+    def __init__(self, provider_type: str = None, config: Dict = None):
+        self.provider_type = provider_type or app_config.llm_provider
+        self.config = config or {
+            "base_url": app_config.llm_base_url,
+            "model": app_config.llm_model
+        }
         self.security = KeyringManager()
         self.provider: Optional[LLMProvider] = None
         self._initialize_provider()
@@ -104,25 +108,36 @@ class LLMService:
 # Backwards compatibility wrapper
 class OllamaClient:
     """Legacy wrapper for LLMService to maintain compatibility with existing code."""
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = None):
+    def __init__(self, base_url: str = "http://localhost:11434", model: Optional[str] = None) -> None:
         self._service = LLMService(provider_type="ollama", config={"base_url": base_url, "model": model})
     
-    def is_available(self): return self._service.is_available()
-    def generate_response(self, prompt, timeout=60): return self._service.generate_response(prompt, timeout)
-    def get_available_models(self): return self._service.get_available_models()
-    def set_model(self, model): return self._service.set_model(model)
-    def preload_model(self, model_name=None): return self._service.preload_model(model_name)
+    def is_available(self) -> bool: 
+        return self._service.is_available()
+    
+    def generate_response(self, prompt: str, timeout: int = 60) -> Optional[str]: 
+        return self._service.generate_response(prompt, timeout)
+    
+    def get_available_models(self) -> List[str]: 
+        return self._service.get_available_models()
+    
+    def set_model(self, model: str) -> bool: 
+        return self._service.set_model(model)
+    
+    def preload_model(self, model_name: Optional[str] = None) -> bool: 
+        return self._service.preload_model(model_name)
+    
     @property
-    def model(self): return self._service.model
+    def model(self) -> Optional[str]: 
+        return self._service.model
 
 class LLMThreadedQuery:
     """Helper for async queries (formerly OllamaThreadedQuery)."""
-    def __init__(self, service: LLMService):
+    def __init__(self, service: LLMService) -> None:
         self.service = service
-        self.result = None
-        self.error = None
+        self.result: Optional[str] = None
+        self.error: Optional[str] = None
 
-    def _worker(self, method_name: str, args: tuple, callback):
+    def _worker(self, method_name: str, args: tuple, callback) -> None:
         try:
             method = getattr(self.service, method_name)
             self.result = method(*args)
@@ -131,7 +146,7 @@ class LLMThreadedQuery:
             self.error = str(e)
             callback(None)
 
-    def generate_async(self, prompt: str, callback, timeout: int = 60):
+    def generate_async(self, prompt: str, callback, timeout: int = 60) -> None:
         threading.Thread(target=self._worker, args=("generate_response", (prompt, timeout), callback), daemon=True).start()
 
 # Helper for compatibility
@@ -160,10 +175,10 @@ def is_ai_available() -> bool:
 
 # --- BACKWARD COMPATIBILITY ALIASES (Deprecated) ---
 
-def get_llm_client(provider_type: str = "ollama", config: Dict = None) -> LLMService:
+def get_llm_client(provider_type: str = "ollama", config: Optional[Dict] = None) -> LLMService:
     return get_ai_client(provider_type, config)
 
-def get_ollama_client(base_url: str = "http://localhost:11434", model: str = None) -> LLMService:
+def get_ollama_client(base_url: str = "http://localhost:11434", model: Optional[str] = None) -> LLMService:
     """Legacy wrapper for get_ai_client."""
     return get_ai_client("ollama", {"base_url": base_url, "model": model})
 
