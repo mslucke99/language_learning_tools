@@ -35,6 +35,14 @@ class LLMProvider(ABC):
         """Return the name of the currently selected model."""
         pass
 
+    @abstractmethod
+    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """
+        Generate mathematical embeddings for a list of strings.
+        Returns a list of vectors (lists of floats).
+        """
+        pass
+
     def preload_model(self, model_name: str = None) -> bool:
         """
         Optional: Pre-load the model into memory. 

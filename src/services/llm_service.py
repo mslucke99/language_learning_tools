@@ -100,6 +100,12 @@ class LLMService:
             return self.provider.generate_response(prompt, timeout)
         return None
 
+    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Unified method for generating embeddings."""
+        if self.provider:
+            return self.provider.generate_embeddings(texts)
+        return []
+
     def preload_model(self, model_name: str = None) -> bool:
         if self.provider:
             return self.provider.preload_model(model_name)

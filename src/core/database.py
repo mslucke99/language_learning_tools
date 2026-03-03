@@ -7,11 +7,11 @@ from src.core.config import config as app_config
 
 class FlashcardDatabase:
     def __init__(self, db_name=None):
-        self.db_path = db_name or app_config.db_path
+        self.db_path = db_name or app_config.db_path or "flashcards.db"
         # check_same_thread=False allows the connection to be used across Flask request threads
         # This is safe for this application since we're not doing concurrent writes
         # isolation_level=None sets autocommit mode for immediate visibility across threads
-        self.conn = sqlite3.connect(db_name, check_same_thread=False, isolation_level=None)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False, isolation_level=None)
         # Enable foreign key support (required for ON DELETE CASCADE)
         self.conn.execute("PRAGMA foreign_keys = ON")
         self._create_tables()
@@ -43,6 +43,8 @@ class FlashcardDatabase:
                 repetitions INTEGER DEFAULT 0,
                 total_reviews INTEGER DEFAULT 0,
                 correct_reviews INTEGER DEFAULT 0,
+                embedding_vector BLOB,
+                category TEXT,
                 FOREIGN KEY (deck_id) REFERENCES decks (id) ON DELETE CASCADE
             )
         """)
@@ -58,7 +60,9 @@ class FlashcardDatabase:
                 language TEXT, -- target language
                 created_at TEXT NOT NULL,
                 processed INTEGER DEFAULT 0,  -- 0=not processed, 1=processed into flashcards
-                tags TEXT     -- comma-separated tags
+                tags TEXT,     -- comma-separated tags
+                embedding_vector BLOB,
+                category TEXT
             )
         """)
         
@@ -425,13 +429,33 @@ class FlashcardDatabase:
                 print(f"[DB] Migrating table {table}: adding deleted_at")
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT")
 
-        # 5. Add suggestions column to sentence_explanations for AI-generated flashcards/grammar
+        # 5. Sentence Explanations suggestions column
         cursor.execute("PRAGMA table_info(sentence_explanations)")
-        columns = [info[1] for info in cursor.fetchall()]
-        
-        if 'suggestions' not in columns:
+        columns_se = [info[1] for info in cursor.fetchall()]
+        if 'suggestions' not in columns_se:
             print("[DB] Migrating sentence_explanations: adding suggestions column")
             cursor.execute("ALTER TABLE sentence_explanations ADD COLUMN suggestions TEXT")
+
+        # 6. Semantic knowledge graph migrations
+        # Add embedding_vector and category to flashcards
+        cursor.execute("PRAGMA table_info(flashcards)")
+        columns = [info[1] for info in cursor.fetchall()]
+        if 'embedding_vector' not in columns:
+            print("[DB] Migrating flashcards: adding embedding_vector")
+            cursor.execute("ALTER TABLE flashcards ADD COLUMN embedding_vector BLOB")
+        if 'category' not in columns:
+            print("[DB] Migrating flashcards: adding category")
+            cursor.execute("ALTER TABLE flashcards ADD COLUMN category TEXT")
+
+        # Add embedding_vector and category to imported_content
+        cursor.execute("PRAGMA table_info(imported_content)")
+        columns = [info[1] for info in cursor.fetchall()]
+        if 'embedding_vector' not in columns:
+            print("[DB] Migrating imported_content: adding embedding_vector")
+            cursor.execute("ALTER TABLE imported_content ADD COLUMN embedding_vector BLOB")
+        if 'category' not in columns:
+            print("[DB] Migrating imported_content: adding category")
+            cursor.execute("ALTER TABLE imported_content ADD COLUMN category TEXT")
 
         # 7. Create known_words table for Sentence Mining
         cursor.execute("""
@@ -458,6 +482,54 @@ class FlashcardDatabase:
                 FOREIGN KEY (flashcard_id) REFERENCES flashcards (id) ON DELETE CASCADE
             )
         """)
+
+        # 8. Create story_sessions table for Adventure Graded Reader
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS story_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                language TEXT NOT NULL,
+                genre TEXT NOT NULL,
+                generation_mode TEXT NOT NULL,  -- 'template' or 'llm'
+                current_passage_id INTEGER,
+                story_context TEXT NOT NULL,  -- JSON blob
+                vocabulary_introduced TEXT,  -- JSON array of words
+                created_at TEXT NOT NULL,
+                last_updated TEXT NOT NULL,
+                completed INTEGER DEFAULT 0,
+                FOREIGN KEY (current_passage_id) REFERENCES story_passages (id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_story_sessions_language ON story_sessions(language)")
+
+        # 9. Create story_passages table for Adventure Graded Reader
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS story_passages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                passage_number INTEGER NOT NULL,
+                story_text TEXT NOT NULL,
+                new_words TEXT NOT NULL,  -- JSON array of {word, translation, context}
+                choices TEXT NOT NULL,  -- JSON array of {id, text, description}
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES story_sessions (id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_story_passages_session ON story_passages(session_id)")
+
+        # 10. Create story_templates table for Adventure Graded Reader
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS story_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                genre TEXT NOT NULL,
+                node_id TEXT NOT NULL,  -- Unique identifier for template node
+                template_text TEXT NOT NULL,
+                suggested_vocab TEXT,  -- JSON array of suggested new words
+                choices TEXT NOT NULL,  -- JSON array of choice templates
+                metadata TEXT,  -- JSON blob for additional data
+                UNIQUE(genre, node_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_story_templates_genre ON story_templates(genre)")
 
         self.conn.commit()
 
@@ -599,7 +671,7 @@ class FlashcardDatabase:
         """Get a specific flashcard."""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews FROM flashcards WHERE id = ?",
+            "SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category FROM flashcards WHERE id = ?",
             (flashcard_id,)
         )
         row = cursor.fetchone()
@@ -613,13 +685,15 @@ class FlashcardDatabase:
         flashcard.repetitions = row[6]
         flashcard.total_reviews = row[7]
         flashcard.correct_reviews = row[8]
+        flashcard.embedding_vector = row[9]
+        flashcard.category = row[10]
         return flashcard
 
     def get_all_flashcards(self, deck_id: int) -> list[Flashcard]:
         """Get all flashcards in a deck."""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews FROM flashcards WHERE deck_id = ? ORDER BY id",
+            "SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category FROM flashcards WHERE deck_id = ? ORDER BY id",
             (deck_id,)
         )
         flashcards = []
@@ -631,6 +705,8 @@ class FlashcardDatabase:
             flashcard.repetitions = row[6]
             flashcard.total_reviews = row[7]
             flashcard.correct_reviews = row[8]
+            flashcard.embedding_vector = row[9]
+            flashcard.category = row[10]
             flashcards.append(flashcard)
         return flashcards
 
@@ -638,7 +714,7 @@ class FlashcardDatabase:
         """Get flashcards due for review in a deck."""
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews FROM flashcards
+            SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category FROM flashcards
             WHERE deck_id = ? AND (last_reviewed IS NULL OR
                   (strftime('%s', 'now') - strftime('%s', last_reviewed)) / 86400 >= interval)
             ORDER BY last_reviewed ASC, id ASC
@@ -653,6 +729,8 @@ class FlashcardDatabase:
             flashcard.repetitions = row[6]
             flashcard.total_reviews = row[7]
             flashcard.correct_reviews = row[8]
+            flashcard.embedding_vector = row[9]
+            flashcard.category = row[10]
             flashcards.append(flashcard)
         return flashcards
 
@@ -660,7 +738,7 @@ class FlashcardDatabase:
         # Update a flashcard's content and stats
         cursor = self.conn.cursor()
         cursor.execute(
-            "UPDATE flashcards SET question = ?, answer = ?, last_reviewed = ?, easiness = ?, interval = ?, repetitions = ?, total_reviews = ?, correct_reviews = ? WHERE id = ?",
+            "UPDATE flashcards SET question = ?, answer = ?, last_reviewed = ?, easiness = ?, interval = ?, repetitions = ?, total_reviews = ?, correct_reviews = ?, embedding_vector = ?, category = ? WHERE id = ?",
             (
                 flashcard.question,
                 flashcard.answer,
@@ -670,6 +748,8 @@ class FlashcardDatabase:
                 flashcard.repetitions,
                 flashcard.total_reviews,
                 flashcard.correct_reviews,
+                flashcard.embedding_vector,
+                flashcard.category,
                 flashcard.id
             )
         )
@@ -742,10 +822,10 @@ class FlashcardDatabase:
             print(f'[DB] Executing INSERT...', flush=True)
             cursor.execute("""
                 INSERT INTO imported_content 
-                (content_type, content, context, title, url, language, created_at, tags)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (content_type, content, context, title, url, language, created_at, tags, embedding_vector, category)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (content_type, content, context, title, url, language, 
-                  datetime.now().isoformat(), tags))
+                  datetime.now().isoformat(), tags, None, None))
             print(f'[DB] INSERT executed', flush=True)
             self.conn.commit()
             print(f'[DB] COMMIT successful', flush=True)
@@ -764,7 +844,7 @@ class FlashcardDatabase:
         cursor = self.conn.cursor()
         if language:
             cursor.execute("""
-                SELECT id, content_type, content, context, title, url, language, created_at, processed, tags
+                SELECT id, content_type, content, context, title, url, language, created_at, processed, tags, embedding_vector, category
                 FROM imported_content 
                 WHERE language = ? OR language IS NULL
                 ORDER BY created_at DESC 
@@ -772,7 +852,7 @@ class FlashcardDatabase:
             """, (language, limit, offset))
         else:
             cursor.execute("""
-                SELECT id, content_type, content, context, title, url, language, created_at, processed, tags
+                SELECT id, content_type, content, context, title, url, language, created_at, processed, tags, embedding_vector, category
                 FROM imported_content 
                 ORDER BY created_at DESC 
                 LIMIT ? OFFSET ?
@@ -790,7 +870,9 @@ class FlashcardDatabase:
                 "language": row[6],
                 "created_at": row[7],
                 "processed": bool(row[8]),
-                "tags": row[9] or ""
+                "tags": row[9] or "",
+                "embedding_vector": row[10],
+                "category": row[11]
             })
         return results
 
@@ -799,14 +881,14 @@ class FlashcardDatabase:
         cursor = self.conn.cursor()
         if language:
             cursor.execute("""
-                SELECT id, content_type, content, context, title, url, language, created_at, processed, tags
+                SELECT id, content_type, content, context, title, url, language, created_at, processed, tags, embedding_vector, category
                 FROM imported_content 
                 WHERE content_type = ? AND (language = ? OR language IS NULL)
                 ORDER BY created_at DESC
             """, (content_type, language))
         else:
             cursor.execute("""
-                SELECT id, content_type, content, context, title, url, language, created_at, processed, tags
+                SELECT id, content_type, content, context, title, url, language, created_at, processed, tags, embedding_vector, category
                 FROM imported_content 
                 WHERE content_type = ?
                 ORDER BY created_at DESC
@@ -824,7 +906,9 @@ class FlashcardDatabase:
                 "language": row[6],
                 "created_at": row[7],
                 "processed": bool(row[8]),
-                "tags": row[9] or ""
+                "tags": row[9] or "",
+                "embedding_vector": row[10],
+                "category": row[11]
             })
         return results
 

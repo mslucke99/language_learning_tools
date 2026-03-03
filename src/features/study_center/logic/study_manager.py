@@ -1683,13 +1683,26 @@ Any important exceptions or nuances.
         """Delete a roleplay scenario."""
         return self.db.delete_roleplay_scenario(scenario_id)
 
-    def generate_roleplay_scenario(self, scenario_type: str, context_text: str = None) -> Tuple[bool, Dict]:
+    def get_semantic_recommendations(self) -> Dict:
+        """Read the latest semantic analysis results from the vocab map."""
+        import os
+        analysis_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "vocab_map.json"))
+        if os.path.exists(analysis_path):
+            try:
+                with open(analysis_path, "r") as f:
+                    return json.load(f)
+            except:
+                pass
+        return {}
+
+    def generate_roleplay_scenario(self, scenario_type: str, context_text: str = None, target_area: str = None) -> Tuple[bool, Dict]:
         """
         Generate a roleplay scenario using AI.
         
         Args:
             scenario_type: The type of scenario (e.g., 'Everyday Life', 'Fantasy')
             context_text: Optional sentence context to incorporate
+            target_area: Optional 'weak', 'strong', or 'adjacent' to target specific clusters
             
         Returns:
             Tuple of (success: bool, scenario_data: Dict)
@@ -1697,16 +1710,40 @@ Any important exceptions or nuances.
         if not self.ai_client or not self.ai_client.is_available():
             return False, {"error": "AI service is not available"}
             
+        # 1. Handle Context / Semantic Recommendations
         context_instruction = ""
+        semantic_area = ""
+        recommended_vocab = ""
+        
         if context_text:
             context_instruction = f"IMPORTANT: This scenario should be built around or heavily feature this specific context: \"{context_text}\""
+        elif target_area:
+            analysis = self.get_semantic_recommendations()
+            area_key = f"{target_area}_areas"
+            areas = analysis.get(area_key, [])
+            if areas:
+                import random
+                chosen = random.choice(areas)
+                words = ", ".join(chosen.get('sample_words', []))
+                
+                if target_area == 'weak':
+                    semantic_area = "This scenario should help the user practice a known weak area."
+                elif target_area == 'strong':
+                    semantic_area = "This scenario should leverage the user's strong vocabulary for advanced practice."
+                else: # adjacent
+                    semantic_area = "This scenario should introduce concepts adjacent to what the user already knows well."
+                
+                recommended_vocab = f"Try to incorporate or elicit these words: {words}"
 
+        # 2. Build Prompt
         prompt_template = self._get_effective_prompt('roleplay', 'generate_scenario')
         prompt = prompt_template.format(
             study_language=self.study_language,
             native_language=self.native_language,
             scenario_type=scenario_type,
-            context_instruction=context_instruction
+            context_instruction=context_instruction,
+            semantic_area=semantic_area,
+            recommended_vocab=recommended_vocab
         )
         
         start_time = time.time()

@@ -256,6 +256,34 @@ class DashboardApp:
     def show_settings(self):
         self.show_frame(SettingsFrame, study_manager=self.study_manager)
 
+    def show_knowledge_graph(self):
+        """Generate and show the semantic knowledge graph in the browser."""
+        import subprocess
+        import os
+        import webbrowser
+        
+        # Show a "Processing" message
+        messagebox.showinfo("Knowledge Graph", "Generating your Semantic Vocabulary Galaxy...\nThis may take a few seconds.")
+        
+        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "scripts", "generate_vocab_map.py"))
+        output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "vocab_map.html"))
+        
+        def _run():
+            try:
+                # Run the script
+                result = subprocess.run([sys.executable, script_path, "--output", output_path], capture_output=True, text=True)
+                if result.returncode == 0:
+                    # Open the result in browser
+                    webbrowser.open(f"file:///{output_path}")
+                else:
+                    messagebox.showerror("Graph Error", f"Failed to generate graph:\n{result.stderr}")
+            except Exception as e:
+                messagebox.showerror("Graph Error", f"An error occurred: {e}")
+        
+        import threading
+        import sys
+        threading.Thread(target=_run, daemon=True).start()
+
     # --- Utils ---
     
     def is_ai_available(self):
@@ -462,12 +490,15 @@ class HomeDashboard(ttk.Frame):
         # Row 2: Advanced Practice
         ttk.Button(grid_frame, text=tr("btn_writing_lab", "✍️ Writing Lab"), command=self.controller.show_writing_lab_view, style="Large.TButton").grid(row=1, column=0, padx=15, pady=15, sticky="nsew")
         ttk.Button(grid_frame, text=tr("btn_chat", "💬 AI Tutor Chat"), command=self.controller.show_chat_dashboard, style="Large.TButton").grid(row=1, column=1, padx=15, pady=15, sticky="nsew")
-        ttk.Button(grid_frame, text=tr("btn_settings", "⚙️ App Settings"), command=self.controller.show_settings, style="Large.TButton").grid(row=1, column=2, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_vocab_map", "🕸️ Knowledge Graph"), command=self.controller.show_knowledge_graph, style="Large.TButton").grid(row=1, column=2, padx=15, pady=15, sticky="nsew")
+        
+        # Row 3: App Settings
+        ttk.Button(grid_frame, text=tr("btn_settings", "⚙️ App Settings"), command=self.controller.show_settings, style="Large.TButton").grid(row=2, column=1, padx=15, pady=15, sticky="nsew")
         
         # Configure grid expansion
         for i in range(3):
             grid_frame.columnconfigure(i, weight=1, minsize=200)
-        for i in range(2):
+        for i in range(3):
             grid_frame.rowconfigure(i, weight=1, minsize=100)
         
         # Footer

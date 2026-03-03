@@ -71,6 +71,30 @@ class OllamaProvider(LLMProvider):
             pass
         return None
 
+    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Implementation for Ollama embedding endpoint."""
+        if not self.available or not self.model:
+            return []
+            
+        try:
+            # Modern Ollama /api/embed supports multiple inputs
+            response = requests.post(
+                f"{self.base_url}/api/embed",
+                json={
+                    "model": self.model,
+                    "input": texts
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("embeddings", [])
+        except Exception as e:
+            print(f"[Ollama] Embedding Error: {e}")
+            
+        return []
+
     def preload_model(self, model_name: str = None) -> bool:
         target_model = model_name or self.model
         if not target_model:

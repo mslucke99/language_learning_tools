@@ -353,7 +353,7 @@ ROLEPLAY_PROMPTS = {
             '{{\n'
             '  "name": "A creative name for the scenario",\n'
             '  "description": "A short summary of what happens",\n'
-            '  "situation": "Detailed context and setup for the interaction",\n'
+            '  "situation": "Detailed context and setup for the interaction. {semantic_area}",\n'
             '  "user_role": "Who the user is playing in this scenario",\n'
             '  "characters": [\n'
             '    {{\n'
@@ -365,7 +365,54 @@ ROLEPLAY_PROMPTS = {
             '}}\n\n'
             'The scenario should be tailored for a student whose native language is {native_language}. '
             'Include 1 or 2 interesting AI characters.\n\n'
-            '{context_instruction}'
+            '{context_instruction}\n'
+            '{recommended_vocab}'
+        ),
+    }
+}
+
+
+# Adventure Graded Reader prompts
+ADVENTURE_READER_PROMPTS = {
+    'generate_passage': {
+        'name': 'Generate Story Passage',
+        'template': (
+            'You are an interactive fiction engine for a language learner studying {target_language}.\n\n'
+            '**CRITICAL CONSTRAINTS:**\n'
+            '1. You MUST use ONLY words from the known vocabulary list below (95% of your output).\n'
+            '2. You may introduce EXACTLY TWO new vocabulary words per response.\n'
+            '3. Keep sentences grammatically simple and clear.\n'
+            '4. End with exactly TWO clear choices for the user.\n\n'
+            '**Known Vocabulary (use these words):**\n'
+            '{known_words_json}\n\n'
+            '**Current Story Context:**\n'
+            'Genre: {genre}\n'
+            'Location: {current_location}\n'
+            'Characters: {characters}\n'
+            'Plot so far: {plot_summary}\n'
+            'Mood: {mood}\n\n'
+            '**Your Task:**\n'
+            'Continue the story based on the context above. Generate the next passage of the story.\n\n'
+            '**Output Format (JSON):**\n'
+            '{{\n'
+            '  "story_text": "The narrative text in {target_language}...",\n'
+            '  "new_words": [\n'
+            '    {{"word": "word1", "translation": "translation1", "context_sentence": "sentence containing word1"}},\n'
+            '    {{"word": "word2", "translation": "translation2", "context_sentence": "sentence containing word2"}}\n'
+            '  ],\n'
+            '  "choices": [\n'
+            '    {{"id": 1, "text": "Choice 1 in {target_language}", "description": "Brief description"}},\n'
+            '    {{"id": 2, "text": "Choice 2 in {target_language}", "description": "Brief description"}}\n'
+            '  ]\n'
+            '}}\n\n'
+            '**Important:**\n'
+            '- story_text should be 2-4 sentences\n'
+            '- Use ONLY known vocabulary + the 2 new words\n'
+            '- Make choices meaningful and advance the plot\n'
+            '- Ensure new words appear in story_text\n'
+            '- Keep it engaging and appropriate for language learners\n'
+            '- Maintain consistency with the story context\n\n'
+            'Generate the JSON response now:'
         ),
     }
 }

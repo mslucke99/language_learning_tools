@@ -11,6 +11,8 @@ class Flashcard:
         self.repetitions = 0        # Number of times reviewed correctly in a row
         self.total_reviews = 0      # Total number of reviews
         self.correct_reviews = 0    # Number of correct reviews
+        self.embedding_vector = None # JSON string or list of floats
+        self.category = None        # Semantic category string
 
     def mark_reviewed(self, quality: int):
         """

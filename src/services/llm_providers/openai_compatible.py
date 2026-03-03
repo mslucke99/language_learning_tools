@@ -90,3 +90,34 @@ class OpenAICompatibleProvider(LLMProvider):
         except Exception as e:
             print(f"[LLM] Error: {e}")
         return None
+
+    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Implementation for OpenAI-compatible embedding endpoint."""
+        if not self.model:
+            # Fallback to a common embedding model if none is specified for embeddings
+            model = "text-embedding-3-small"
+        else:
+            model = self.model
+            
+        try:
+            payload = {
+                "model": model,
+                "input": texts
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/embeddings",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                # Unified format: data["data"] -> items with "embedding"
+                return [item["embedding"] for item in data["data"]]
+            else:
+                print(f"[LLM] Embedding Error {response.status_code}: {response.text}")
+        except Exception as e:
+            print(f"[LLM] Embedding Error: {e}")
+        return []
