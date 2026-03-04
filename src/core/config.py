@@ -23,6 +23,11 @@ class AppConfig:
     native_language: str = os.getenv("NATIVE_LANGUAGE", "English")
     study_language: str = os.getenv("STUDY_LANGUAGE", "Spanish")
     
+    # Audio / Voice Settings
+    stt_provider: str = os.getenv("STT_PROVIDER", "gemini")
+    tts_provider: str = os.getenv("TTS_PROVIDER", "gtts")
+    audio_sample_rate: int = int(os.getenv("AUDIO_SAMPLE_RATE", "44100"))
+    
     # Paths
     db_path: str = os.getenv("DB_PATH", "flashcards.db")
     config_path: str = os.getenv("CONFIG_PATH", "config.json")

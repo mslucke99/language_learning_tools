@@ -6,6 +6,10 @@ from src.core.database import FlashcardDatabase
 from src.core.ui_utils import setup_standard_header
 from src.features.study_center.ui.dialogs import DeckPickerDialog
 from src.core.localization import tr
+from src.services.audio_service import AudioRecorder
+from src.core.config import config as app_config
+import os
+import threading
 
 class WritingTopicDialog(tk.Toplevel):
     """Dialog for customizing writing topic generation options."""
@@ -147,6 +151,10 @@ class WritingLabFrame(ttk.Frame):
         self.study_manager = study_manager
         self.embedded = embedded
         
+        self.audio_recorder = AudioRecorder(sample_rate=app_config.audio_sample_rate)
+        self.is_recording = False
+        self.speech_mode = tk.BooleanVar(value=False)
+        
         self.setup_ui()
         
     def setup_ui(self):
@@ -203,6 +211,15 @@ class WritingLabFrame(ttk.Frame):
             text=tr("btn_generate_topic", "🎲 Generate Topic"), 
             command=self._generate_writing_topic
         ).pack(side="right", padx=2, ipady=5)
+
+        # Speech Mode Toggle
+        self.speech_check = ttk.Checkbutton(
+            toolbar,
+            text=tr("lbl_speech_mode", "🎙️ Speech Mode"),
+            variable=self.speech_mode,
+            command=self._on_toggle_speech_mode
+        )
+        self.speech_check.pack(side="right", padx=10)
         
         # SIDE-BY-SIDE LAYOUT: Topic (Left) + Writing (Right)
         main_container = ttk.Frame(self.comp_tab)
@@ -225,6 +242,70 @@ class WritingLabFrame(ttk.Frame):
         
         self.writing_text = tk.Text(writing_frame, font=("Segoe UI", 11), wrap="word", undo=True)
         self.writing_text.pack(fill="both", expand=True)
+
+        # RECORDING UI (Overlay or swap)
+        self.record_frame = ttk.Frame(writing_frame)
+        self.record_btn = ttk.Button(
+            self.record_frame,
+            text=tr("btn_start_recording", "🎤 Start Oral Presentation"),
+            command=self._toggle_speech_recording,
+            style="Large.TButton"
+        )
+        self.record_btn.pack(pady=50)
+        self.speech_status = ttk.Label(self.record_frame, text="", font=("Segoe UI", 12, "italic"))
+        self.speech_status.pack()
+
+    def _on_toggle_speech_mode(self):
+        if self.speech_mode.get():
+            self.writing_text.pack_forget()
+            self.record_frame.pack(fill="both", expand=True)
+            self.grade_btn.config(state=tk.DISABLED)
+        else:
+            self.record_frame.pack_forget()
+            self.writing_text.pack(fill="both", expand=True)
+            self.grade_btn.config(state=tk.NORMAL)
+
+    def _toggle_speech_recording(self):
+        topic = self.topic_text.get("1.0", tk.END).strip()
+        if not topic or topic.startswith("Type your own"):
+            if not messagebox.askyesno("No Topic", "You haven't set a topic. Record anyway?"):
+                return
+            topic = "Free Speech"
+
+        if not self.is_recording:
+            try:
+                self.audio_recorder.start_recording()
+                self.is_recording = True
+                self.record_btn.config(text=tr("btn_stop_recording", "🛑 Stop Recording"))
+                self.speech_status.config(text="Recording Presentation...", foreground="red")
+            except Exception as e:
+                messagebox.showerror("Audio Error", str(e))
+        else:
+            self.is_recording = False
+            self.record_btn.config(text=tr("btn_start_recording", "🎤 Start Oral Presentation"), state=tk.DISABLED)
+            self.speech_status.config(text="Processing Speech Analysis...", foreground="blue")
+            
+            try:
+                audio_path = self.audio_recorder.stop_recording()
+                self._grade_speech(audio_path, topic)
+            except Exception as e:
+                messagebox.showerror("Audio Error", str(e))
+                self.record_btn.config(state=tk.NORMAL)
+                self.speech_status.config(text="")
+
+    def _grade_speech(self, audio_path, topic):
+        self.feedback_display.configure(state="normal")
+        self.feedback_display.delete("1.0", tk.END)
+        self.feedback_display.insert("1.0", tr("msg_analyzing", "Analyzing your presentation..."))
+        self.feedback_display.configure(state="disabled")
+        
+        def _task():
+            task_id = self.study_manager.queue_generation_task('grade_speech', 0, audio_path=audio_path, topic=topic)
+            self.after(0, lambda: self._check_writing_task(task_id, "grade"))
+            self.after(0, lambda: self.record_btn.config(state=tk.NORMAL))
+            self.after(0, lambda: self.speech_status.config(text=""))
+            
+        threading.Thread(target=_task, daemon=True).start()
 
     def setup_feedback_tab(self):
         """Feedback tab - displays AI feedback after grading"""

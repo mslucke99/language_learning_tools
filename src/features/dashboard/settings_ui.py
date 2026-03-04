@@ -37,6 +37,11 @@ class SettingsUI(ttk.Frame):
         self.api_key_var = tk.StringVar()
         self.base_url_var = tk.StringVar()
         
+        # Audio & Voice Variables
+        self.stt_provider_var = tk.StringVar(value=app_config.stt_provider)
+        self.tts_provider_var = tk.StringVar(value=app_config.tts_provider)
+        self.audio_rate_var = tk.IntVar(value=app_config.audio_sample_rate)
+        
         from src.services.llm_providers.security import KeyringManager
         self.keyring = KeyringManager()
         
@@ -170,6 +175,36 @@ class SettingsUI(ttk.Frame):
         dict_tab = DictionarySettingsFrame(self.notebook)
         self.notebook.add(dict_tab, text=tr("tab_dictionaries", "📚 Dictionaries"))
 
+        # --- TAB 3.7: AUDIO & VOICE ---
+        audio_tab = ttk.Frame(self.notebook, padding="20")
+        self.notebook.add(audio_tab, text=tr("tab_audio_voice", "🎙️ Audio & Voice"))
+        
+        ttk.Label(audio_tab, text=tr("lbl_audio_settings", "Audio & Voice Services"), font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        
+        audio_grid = ttk.Frame(audio_tab)
+        audio_grid.pack(fill="x")
+        
+        # STT Provider
+        ttk.Label(audio_grid, text=tr("lbl_stt_provider", "Speech-to-Text (STT):")).grid(row=0, column=0, sticky="w", pady=10)
+        stt_combo = ttk.Combobox(audio_grid, textvariable=self.stt_provider_var, state="readonly", width=32,
+                                values=["gemini", "whisper_cloud", "whisper_local"])
+        stt_combo.grid(row=0, column=1, sticky="w", padx=15)
+        
+        # TTS Provider
+        ttk.Label(audio_grid, text=tr("lbl_tts_provider", "Text-to-Speech (TTS):")).grid(row=1, column=0, sticky="w", pady=10)
+        tts_combo = ttk.Combobox(audio_grid, textvariable=self.tts_provider_var, state="readonly", width=32,
+                                values=["gtts", "pyttsx3"])
+        tts_combo.grid(row=1, column=1, sticky="w", padx=15)
+        
+        # Sample Rate
+        ttk.Label(audio_grid, text=tr("lbl_sample_rate", "Sample Rate (Hz):")).grid(row=2, column=0, sticky="w", pady=10)
+        rate_combo = ttk.Combobox(audio_grid, textvariable=self.audio_rate_var, state="readonly", width=32,
+                                 values=[16000, 22050, 44100, 48000])
+        rate_combo.grid(row=2, column=1, sticky="w", padx=15)
+        
+        ttk.Label(audio_tab, text=tr("tip_audio_config", "Note: Gemini STT is recommended for best grading accuracy. pyttsx3 works offline."), 
+                  font=("Arial", 9, "italic"), foreground="gray", wraplength=500).pack(anchor="w", pady=20)
+
         # --- TAB 4: CLOUD SYNC ---
         sync_tab = ttk.Frame(self.notebook, padding="20")
         self.notebook.add(sync_tab, text=tr("tab_cloud_sync", "☁️ Cloud Sync (Dropbox)"))
@@ -296,6 +331,12 @@ class SettingsUI(ttk.Frame):
         self.timeout_var.set(self.study_manager.get_request_timeout())
         self.preload_var.set(self.study_manager.get_preload_on_startup())
         
+        # Load Audio Settings
+        from src.core.config import config as app_config
+        self.stt_provider_var.set(app_config.stt_provider)
+        self.tts_provider_var.set(app_config.tts_provider)
+        self.audio_rate_var.set(app_config.audio_sample_rate)
+        
         # Load Provider Config
         self.provider_var.set(self.study_manager.llm_provider)
         self.base_url_var.set(self.study_manager.llm_base_url or "")
@@ -402,6 +443,13 @@ class SettingsUI(ttk.Frame):
             self.study_manager.set_llm_model(self.model_var.get())
             self.study_manager.set_request_timeout(self.timeout_var.get())
             self.study_manager.set_preload_on_startup(self.preload_var.get())
+            
+            # Save Audio Settings
+            from src.core.config import config as app_config
+            app_config.stt_provider = self.stt_provider_var.get()
+            app_config.tts_provider = self.tts_provider_var.get()
+            app_config.audio_sample_rate = int(self.audio_rate_var.get())
+            app_config.save_to_file()
             
             messagebox.showinfo("Success", "Settings saved successfully!")
             self.go_back()

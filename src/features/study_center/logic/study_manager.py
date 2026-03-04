@@ -169,9 +169,6 @@ class StudyManager:
         """Public access to effective prompt."""
         return self._get_effective_prompt(category, prompt_id, template_type)
 
-    def ai_available(self) -> bool:
-        """Check if the AI service is available."""
-        return self.ai_client is not None and self.ai_client.is_available()
 
     def update_llm_config(self, provider: str, model: str, base_url: str = None):
         """Update and activate an LLM provider configuration."""
@@ -408,6 +405,8 @@ class StudyManager:
                     if 'current_history' not in kwargs:
                         kwargs['current_history'] = []
                     success, result, suggestions = self.send_chat_message(**kwargs)
+                elif task_type == 'grade_speech':
+                    success, result, suggestions = self.grade_speech(kwargs.get('audio_path'), kwargs.get('topic'))
                 elif task_type == 'generate_roleplay_scenario':
                     success, result = self.generate_roleplay_scenario(
                         kwargs.get('scenario_type'), 
@@ -1621,6 +1620,55 @@ Any important exceptions or nuances.
             return False, "Failed to grade writing", {}
         except Exception as e:
             self._log_debug('grade_writing', prompt, "ERROR", time.time() - start_time, error=str(e))
+            import traceback
+            traceback.print_exc()
+            return False, f"Error: {e}", {}
+
+    def grade_speech(self, audio_path: str, topic: str) -> Tuple[bool, str, Dict]:
+        """Transcribe speech, grade fluency/naturalness, and provide feedback."""
+        if not self.ai_client or not self.ai_client.is_available():
+            return False, "AI service is not available", {}
+            
+        from src.services.stt_providers import get_stt_provider
+        from src.core.config import config as app_config
+        
+        try:
+            # 1. Transcribe
+            stt = get_stt_provider(app_config.stt_provider)
+            stt_res = stt.transcribe(audio_path)
+            transcript = stt_res.text
+            
+            # 2. Grade
+            prompt_template = self._get_effective_prompt('speech', 'fluency_grade')
+            prompt = prompt_template.format(
+                study_language=self.study_language,
+                topic=topic,
+                native_language=self.native_language
+            )
+            
+            start_time = time.time()
+            content = self.ai_client.generate_response(prompt + f"\n\nTranscript: {transcript}", timeout=self.request_timeout)
+            duration = time.time() - start_time
+            
+            self._log_debug('grade_speech', prompt, content or "EMPTY", duration, description=f"Grading speech: {topic}")
+            
+            if content:
+                clean_content, suggestions = self._parse_ai_response(content)
+                
+                # Save to history (mark as Spoken)
+                grade_match = re.search(r'Overall Grade:\s*(.*?)(?:\n|$)', clean_content, re.IGNORECASE)
+                grade = grade_match.group(1).strip() if grade_match else "N/A"
+                
+                display_topic = f"🎙️ {topic}"
+                self.db.add_writing_session(
+                    display_topic, transcript, clean_content, grade, 
+                    self.study_language, analysis=json.dumps(suggestions)
+                )
+                
+                return True, clean_content, suggestions
+            return False, "Failed to analyze speech", {}
+            
+        except Exception as e:
             import traceback
             traceback.print_exc()
             return False, f"Error: {e}", {}

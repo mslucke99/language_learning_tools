@@ -45,6 +45,7 @@ class FlashcardDatabase:
                 correct_reviews INTEGER DEFAULT 0,
                 embedding_vector BLOB,
                 category TEXT,
+                pronunciation_flag INTEGER DEFAULT 0,
                 FOREIGN KEY (deck_id) REFERENCES decks (id) ON DELETE CASCADE
             )
         """)
@@ -436,6 +437,13 @@ class FlashcardDatabase:
             print("[DB] Migrating sentence_explanations: adding suggestions column")
             cursor.execute("ALTER TABLE sentence_explanations ADD COLUMN suggestions TEXT")
 
+        # 5.5 Pronunciation Flag Migration
+        cursor.execute("PRAGMA table_info(flashcards)")
+        columns_fc = [info[1] for info in cursor.fetchall()]
+        if 'pronunciation_flag' not in columns_fc:
+            print("[DB] Migrating flashcards: adding pronunciation_flag")
+            cursor.execute("ALTER TABLE flashcards ADD COLUMN pronunciation_flag INTEGER DEFAULT 0")
+
         # 6. Semantic knowledge graph migrations
         # Add embedding_vector and category to flashcards
         cursor.execute("PRAGMA table_info(flashcards)")
@@ -671,7 +679,7 @@ class FlashcardDatabase:
         """Get a specific flashcard."""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category FROM flashcards WHERE id = ?",
+            "SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category, pronunciation_flag FROM flashcards WHERE id = ?",
             (flashcard_id,)
         )
         row = cursor.fetchone()
@@ -687,13 +695,14 @@ class FlashcardDatabase:
         flashcard.correct_reviews = row[8]
         flashcard.embedding_vector = row[9]
         flashcard.category = row[10]
+        flashcard.pronunciation_flag = bool(row[11])
         return flashcard
 
     def get_all_flashcards(self, deck_id: int) -> list[Flashcard]:
         """Get all flashcards in a deck."""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category FROM flashcards WHERE deck_id = ? ORDER BY id",
+            "SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category, pronunciation_flag FROM flashcards WHERE deck_id = ? ORDER BY id",
             (deck_id,)
         )
         flashcards = []
@@ -707,6 +716,7 @@ class FlashcardDatabase:
             flashcard.correct_reviews = row[8]
             flashcard.embedding_vector = row[9]
             flashcard.category = row[10]
+            flashcard.pronunciation_flag = bool(row[11])
             flashcards.append(flashcard)
         return flashcards
 
@@ -714,7 +724,7 @@ class FlashcardDatabase:
         """Get flashcards due for review in a deck."""
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category FROM flashcards
+            SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category, pronunciation_flag FROM flashcards
             WHERE deck_id = ? AND (last_reviewed IS NULL OR
                   (strftime('%s', 'now') - strftime('%s', last_reviewed)) / 86400 >= interval)
             ORDER BY last_reviewed ASC, id ASC
@@ -731,6 +741,7 @@ class FlashcardDatabase:
             flashcard.correct_reviews = row[8]
             flashcard.embedding_vector = row[9]
             flashcard.category = row[10]
+            flashcard.pronunciation_flag = bool(row[11])
             flashcards.append(flashcard)
         return flashcards
 
@@ -738,7 +749,7 @@ class FlashcardDatabase:
         # Update a flashcard's content and stats
         cursor = self.conn.cursor()
         cursor.execute(
-            "UPDATE flashcards SET question = ?, answer = ?, last_reviewed = ?, easiness = ?, interval = ?, repetitions = ?, total_reviews = ?, correct_reviews = ?, embedding_vector = ?, category = ? WHERE id = ?",
+            "UPDATE flashcards SET question = ?, answer = ?, last_reviewed = ?, easiness = ?, interval = ?, repetitions = ?, total_reviews = ?, correct_reviews = ?, embedding_vector = ?, category = ?, pronunciation_flag = ? WHERE id = ?",
             (
                 flashcard.question,
                 flashcard.answer,
@@ -750,11 +761,47 @@ class FlashcardDatabase:
                 flashcard.correct_reviews,
                 flashcard.embedding_vector,
                 flashcard.category,
+                1 if getattr(flashcard, 'pronunciation_flag', False) else 0,
                 flashcard.id
             )
         )
         self.conn.commit()
         return cursor.rowcount > 0
+
+    def set_pronunciation_flag(self, card_id: int, flag: bool) -> bool:
+        """Helper to quickly toggle the pronunciation flag."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE flashcards SET pronunciation_flag = ? WHERE id = ?",
+            (1 if flag else 0, card_id)
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def get_pronunciation_flagged_cards(self, deck_id: int = None) -> list[Flashcard]:
+        """Get all flashcards flagged for pronunciation practice (optionally filtered by deck)."""
+        cursor = self.conn.cursor()
+        query = "SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category, pronunciation_flag FROM flashcards WHERE pronunciation_flag = 1"
+        params = []
+        if deck_id is not None:
+            query += " AND deck_id = ?"
+            params.append(deck_id)
+        
+        cursor.execute(query, params)
+        flashcards = []
+        for row in cursor.fetchall():
+            flashcard = Flashcard(row[1], row[2], card_id=row[0])
+            flashcard.last_reviewed = datetime.fromisoformat(row[3]) if row[3] else None
+            flashcard.easiness = row[4]
+            flashcard.interval = row[5]
+            flashcard.repetitions = row[6]
+            flashcard.total_reviews = row[7]
+            flashcard.correct_reviews = row[8]
+            flashcard.embedding_vector = row[9]
+            flashcard.category = row[10]
+            flashcard.pronunciation_flag = bool(row[11])
+            flashcards.append(flashcard)
+        return flashcards
 
     def delete_flashcard(self, flashcard_id: int) -> bool:
         """Delete a flashcard."""

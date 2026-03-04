@@ -19,7 +19,8 @@ from src.features.study_center.ui.sentences_view import SentencesViewFrame
 from src.features.study_center.ui.grammar_book_view import GrammarBookViewFrame
 from src.features.study_center.ui.quiz_ui import QuizUIFrame
 
-from src.features.writing_lab.ui.writing_lab import WritingLabFrame
+from src.features.pronunciation_lab.ui.pronunciation_lab import PronunciationLabFrame
+from src.features.audio_review.ui.audio_review import AudioReviewFrame
 
 from src.features.chat.ui.chat_dashboard import ChatDashboardFrame
 from src.features.chat.ui.active_chat import ActiveChatFrame
@@ -242,6 +243,14 @@ class DashboardApp:
     
     def show_writing_lab_view(self):
         self.show_frame(WritingLabFrame, study_manager=self.study_manager)
+        
+    def show_pronunciation_lab_view(self):
+        self.show_frame(PronunciationLabFrame, study_manager=self.study_manager, db=self.db)
+        
+    # --- Audio Review Feature ---
+    
+    def show_audio_review_view(self):
+        self.show_frame(AudioReviewFrame, study_manager=self.study_manager, db=self.db)
         
     # --- Chat Feature ---
     
@@ -490,10 +499,12 @@ class HomeDashboard(ttk.Frame):
         # Row 2: Advanced Practice
         ttk.Button(grid_frame, text=tr("btn_writing_lab", "✍️ Writing Lab"), command=self.controller.show_writing_lab_view, style="Large.TButton").grid(row=1, column=0, padx=15, pady=15, sticky="nsew")
         ttk.Button(grid_frame, text=tr("btn_chat", "💬 AI Tutor Chat"), command=self.controller.show_chat_dashboard, style="Large.TButton").grid(row=1, column=1, padx=15, pady=15, sticky="nsew")
-        ttk.Button(grid_frame, text=tr("btn_vocab_map", "🕸️ Knowledge Graph"), command=self.controller.show_knowledge_graph, style="Large.TButton").grid(row=1, column=2, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_pronunciation_lab", "🎙️ Pronunciation Lab"), command=self.controller.show_pronunciation_lab_view, style="Large.TButton").grid(row=1, column=2, padx=15, pady=15, sticky="nsew")
         
         # Row 3: App Settings
-        ttk.Button(grid_frame, text=tr("btn_settings", "⚙️ App Settings"), command=self.controller.show_settings, style="Large.TButton").grid(row=2, column=1, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_vocab_map", "🕸️ Knowledge Graph"), command=self.controller.show_knowledge_graph, style="Large.TButton").grid(row=2, column=0, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("lbl_audio_review", "🎙️ Audio Review"), command=self.controller.show_audio_review_view, style="Large.TButton").grid(row=2, column=1, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_settings", "⚙️ App Settings"), command=self.controller.show_settings, style="Large.TButton").grid(row=2, column=2, padx=15, pady=15, sticky="nsew")
         
         # Configure grid expansion
         for i in range(3):

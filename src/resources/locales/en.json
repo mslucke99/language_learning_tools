@@ -43,6 +43,7 @@
     "btn_writing_lab": "✍️ Writing Lab",
     "btn_chat": "💬 Chat with AI",
     "btn_quiz": "📝 Quiz Yourself",
+    "btn_mark_audio_review": "📌 Mark for Audio Review",
     "btn_main_menu": "← Back to Main Menu",
     "btn_tasks": "📋 Tasks",
     "btn_dev": "🚀 Dev",
@@ -215,5 +216,19 @@
     "btn_move": "Move",
     "tree_type": "Type",
     "tree_difficulty": "Difficulty",
-    "tree_score": "Score"
+    "tree_score": "Score",
+    "lbl_pronunciation_lab": "🗣️ Pronunciation Lab",
+    "lbl_audio_review": "🎙️ Audio Review",
+    "title_audio_review": "Audio Review",
+    "desc_audio_review": "Hands-free voice review of your due flashcards.",
+    "lbl_speech_coach": "🎤 Speech Coach",
+    "lbl_speech_mode": "🎙️ Speech Mode",
+    "btn_start_recording": "🎤 Start Oral Presentation",
+    "btn_stop_recording": "🛑 Stop Recording",
+    "tab_audio_voice": "🎙️ Audio & Voice",
+    "lbl_audio_settings": "Audio & Voice Services",
+    "lbl_stt_provider": "Speech-to-Text (STT):",
+    "lbl_tts_provider": "Text-to-Speech (TTS):",
+    "lbl_sample_rate": "Sample Rate (Hz):",
+    "tip_audio_config": "Note: Gemini STT is recommended for best grading accuracy. pyttsx3 works offline."
 }

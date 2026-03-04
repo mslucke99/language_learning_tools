@@ -13,6 +13,7 @@ class Flashcard:
         self.correct_reviews = 0    # Number of correct reviews
         self.embedding_vector = None # JSON string or list of floats
         self.category = None        # Semantic category string
+        self.pronunciation_flag = False  # Whether to practice pronunciation in audio review
 
     def mark_reviewed(self, quality: int):
         """

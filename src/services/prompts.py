@@ -416,3 +416,66 @@ ADVENTURE_READER_PROMPTS = {
         ),
     }
 }
+
+# Pronunciation Lab and Speech Presentation Coach prompts
+PRONUNCIATION_PROMPTS = {
+    'multimodal_grade': {
+        'name': 'Multimodal Pronunciation Grade',
+        'template': (
+            'You are an expert {study_language} pronunciation coach. The user is practicing the following text:\n'
+            '"{text}"\n\n'
+            'Listen to the provided audio file. Grade the user\'s pronunciation and spoken fluency based on the audio.\n'
+            'Provide feedback in {native_language} covering:\n'
+            '1. **Overall Pronunciation Score**: A percentage (0-100%).\n'
+            '2. **Strengths**: What sounded natural or was pronounced correctly?\n'
+            '3. **Corrections**: Specific mispronounced words, missed intonation, or incorrect stress.\n'
+            '4. **Improvement Tips**: Actionable advice to improve their accent.\n\n'
+            'Be encouraging but precise. If the audio is completely off or blank, gently let them know.'
+        ),
+    },
+    'text_diff_grade': {
+        'name': 'Text-based Pronunciation Grade',
+        'template': (
+            'You are a {study_language} language tutor. The user tried to say the following target text:\n'
+            '"{target_text}"\n\n'
+            'However, the Speech-to-Text engine transcribed their speech as:\n'
+            '"{transcribed_text}"\n\n'
+            'Based on the transcription difference, provide feedback in {native_language} covering:\n'
+            '1. **Accuracy Score**: A percentage (0-100%).\n'
+            '2. **Missing/Incorrect Words**: Which words did they miss or mispronounce (causing the STT to misunderstand)?\n'
+            '3. **Pronunciation Tips**: How to pronounce the difficult parts of the target text.\n\n'
+            'Assume the STT engine is mostly accurate, but account for minor homophone errors.'
+        ),
+    }
+}
+
+SPEECH_PROMPTS = {
+    'fluency_grade': {
+        'name': 'Speech Presentation Coach',
+        'template': (
+            'You are a public speaking and language coach for {study_language}. The user has provided an audio recording of a speech or free-talk session.\n'
+            'The topic or prompt they were responding to was: "{topic}"\n\n'
+            'Analyze their spoken response (from the audio) and provide feedback in {native_language} covering:\n'
+            '1. **Overall Grade**: A descriptive grade (e.g., A, B+, Beginner, Intermediate).\n'
+            '2. **Fluency & Pacing**: Analyze their speaking rhythm, hesitations, and use of filler words.\n'
+            '3. **Vocabulary & Grammar**: Note any excellent usage or noticeable errors.\n'
+            '4. **Naturalness**: How natural do they sound? What could be improved?\n\n'
+            '**Suggestions**: \n'
+            '- If the user could benefit from learning a specific new word to express their ideas better, '
+            'append: <flashcard word="TERM" context="SUGGESTED_SENTENCE">BRIEF_DEFINITION</flashcard>\n'
+            '- If there is a grammar pattern they misused, '
+            'append: <grammar_pattern title="PATTERN_NAME">BRIEF_EXPLANATION</grammar_pattern>'
+        ),
+    },
+    'commuter_check': {
+        'name': 'Audio Review Answer Check',
+        'template': (
+            'You are grading an oral flashcard review for {study_language}.\n'
+            'Target Language Text: "{question}"\n'
+            'Expected Meaning/Translation: "{answer}"\n\n'
+            'The user\'s oral response was transcribed as: "{transcription}"\n\n'
+            'Did the user convey the correct meaning or provide the correct translation? Answer strictly with "CORRECT" or "INCORRECT", '
+            'followed by a brief 1-sentence explanation of why, focusing on semantic similarity.'
+        ),
+    }
+}

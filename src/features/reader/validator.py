@@ -328,3 +328,26 @@ def validate_passage(
     """
     validator = VocabularyValidator(language)
     return validator.validate_vocabulary(passage, constraints)
+
+
+# Standalone function for convenience
+def validate_vocabulary(
+    passage: StoryPassage,
+    constraints: VocabularyConstraints,
+    language: str = "korean"
+) -> ValidationResult:
+    """
+    Standalone function to validate vocabulary in a passage.
+    
+    This is a convenience wrapper around VocabularyValidator.validate_vocabulary().
+    
+    Args:
+        passage: StoryPassage to validate
+        constraints: VocabularyConstraints to check against
+        language: Target language for tokenization
+    
+    Returns:
+        ValidationResult with is_valid, coverage, and unknown_words
+    """
+    validator = VocabularyValidator(language=language)
+    return validator.validate_vocabulary(passage, constraints)

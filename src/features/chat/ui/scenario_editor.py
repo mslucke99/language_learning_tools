@@ -256,7 +256,7 @@ class ScenarioEditorDialog(tk.Toplevel):
 
     def _on_auto_generate(self):
         """Trigger AI scenario generation."""
-        if not self.study_manager.ai_available():
+        if not self.study_manager.ai_available:
             messagebox.showwarning(tr("error_title", "AI Unavailable"), tr("msg_ai_unavailable", "AI service is not available. Check your settings."))
             return
             
