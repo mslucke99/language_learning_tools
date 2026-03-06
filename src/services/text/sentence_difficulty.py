@@ -38,6 +38,7 @@ DEFAULT_WEIGHTS = {
 UNKNOWN_THRESHOLD = 0.75  # Words with < 75% recall prob are treated as "unknown"
 STEEPNESS = 0.005
 DEFAULT_NON_SRS_RECALL = 0.15  # Default for words not found in freq/graded lists
+ALL_KNOWN_STRUCTURAL_DISCOUNT = 0.3  # Structural features weight scale when all words are known
 
 
 @dataclass
@@ -159,6 +160,10 @@ class SentenceDifficultyScorer:
         if self.resources.has_parser and sentence.strip():
             dep_complexity_norm = self._dependency_complexity(sentence)
 
+        # When every word is known, structural complexity is much less
+        # of a barrier — dampen its contribution
+        structural_discount = ALL_KNOWN_STRUCTURAL_DISCOUNT if unknown_count == 0 else 1.0
+
         # Difficulty = weighted sum with inversion for recall (high recall -> low difficulty)
         raw = {
             "mean_recall": mean_recall,
@@ -172,9 +177,9 @@ class SentenceDifficultyScorer:
             self.weights.get("mean_recall", 0) * (1.0 - raw["mean_recall"])
             + self.weights.get("min_recall", 0) * (1.0 - raw["min_recall"])
             + self.weights.get("unknown_ratio", 0) * raw["unknown_ratio"]
-            + self.weights.get("length", 0) * raw["length"]
-            + self.weights.get("avg_word_length", 0) * raw["avg_word_length"]
-            + self.weights.get("dep_complexity", 0) * raw["dep_complexity"]
+            + self.weights.get("length", 0) * raw["length"] * structural_discount
+            + self.weights.get("avg_word_length", 0) * raw["avg_word_length"] * structural_discount
+            + self.weights.get("dep_complexity", 0) * raw["dep_complexity"] * structural_discount
         )
         difficulty_score = round(max(0.0, min(1.0, difficulty_score)), 4)
 
@@ -279,6 +284,9 @@ class SentenceDifficultyScorer:
         if self.resources.has_parser and sentence.strip():
             dep_complexity_norm = self._dependency_complexity(sentence)
 
+        # Apply structural discount if all words are known
+        structural_discount = ALL_KNOWN_STRUCTURAL_DISCOUNT if unknown_count == 0 else 1.0
+
         raw = {
             "mean_recall": mean_recall,
             "min_recall": min_recall,
@@ -292,9 +300,9 @@ class SentenceDifficultyScorer:
             self.weights.get("mean_recall", 0) * (1.0 - raw["mean_recall"])
             + self.weights.get("min_recall", 0) * (1.0 - raw["min_recall"])
             + self.weights.get("unknown_ratio", 0) * raw["unknown_ratio"]
-            + self.weights.get("length", 0) * raw["length"]
-            + self.weights.get("avg_word_length", 0) * raw["avg_word_length"]
-            + self.weights.get("dep_complexity", 0) * raw["dep_complexity"]
+            + self.weights.get("length", 0) * raw["length"] * structural_discount
+            + self.weights.get("avg_word_length", 0) * raw["avg_word_length"] * structural_discount
+            + self.weights.get("dep_complexity", 0) * raw["dep_complexity"] * structural_discount
         )
         difficulty_score = round(max(0.0, min(1.0, difficulty_score)), 4)
 
@@ -306,6 +314,48 @@ class SentenceDifficultyScorer:
             feature_sources=dict(sources),
             bottleneck_word=min(tokens, key=lambda w: recall_by_word[w]) if tokens else None,
             unknown_count=unknown_count,
+        )
+
+    def reweight_with_semantics(
+        self, score: SentenceScore, semantic_familiarity: float, semantic_weight: float = 0.10
+    ) -> SentenceScore:
+        """
+        Dynamically adjust a score to include semantic topic familiarity.
+        Proportionally reduces existing weights to make room for semantic weight.
+        """
+        # 1. Create a copy of existing weights and features
+        current_weights = dict(self.weights)
+        raw = dict(score.features)
+        raw["semantic_familiarity"] = semantic_familiarity
+
+        # 2. Rescale other weights
+        scale = 1.0 - semantic_weight
+        new_weights = {k: v * scale for k, v in current_weights.items()}
+        new_weights["semantic_familiarity"] = semantic_weight
+
+        # 3. Apply structural discount if applicable
+        structural_discount = ALL_KNOWN_STRUCTURAL_DISCOUNT if score.unknown_count == 0 else 1.0
+
+        # 4. Calculate new difficulty (inverting familiarity: high fam -> low diff)
+        difficulty_score = (
+            new_weights.get("mean_recall", 0) * (1.0 - raw["mean_recall"])
+            + new_weights.get("min_recall", 0) * (1.0 - raw["min_recall"])
+            + new_weights.get("unknown_ratio", 0) * raw["unknown_ratio"]
+            + new_weights.get("length", 0) * raw["length"] * structural_discount
+            + new_weights.get("avg_word_length", 0) * raw["avg_word_length"] * structural_discount
+            + new_weights.get("dep_complexity", 0) * raw["dep_complexity"] * structural_discount
+            + new_weights.get("semantic_familiarity", 0) * (1.0 - raw["semantic_familiarity"])
+        )
+        difficulty_score = round(max(0.0, min(1.0, difficulty_score)), 4)
+
+        return SentenceScore(
+            sentence=score.sentence,
+            difficulty_score=difficulty_score,
+            confidence=score.confidence,
+            features=raw,
+            feature_sources=score.feature_sources,
+            bottleneck_word=score.bottleneck_word,
+            unknown_count=score.unknown_count,
         )
 
     def _tokenize(self, text: str, lang_code: str) -> List[str]:

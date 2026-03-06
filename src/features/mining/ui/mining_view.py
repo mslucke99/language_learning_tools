@@ -23,6 +23,9 @@ from src.features.chat.ui.scenario_editor import ScenarioEditorDialog
 
 
 from src.features.study_center.logic.study_manager import StudyManager
+from src.services.semantic_visualizer import SemanticVisualizer
+from src.services.text.semantic_familiarity import SemanticFamiliarityScorer
+from src.services.llm_service import get_ai_client
 
 class SentenceMiningView(ttk.Frame):
     def __init__(self, parent, db: FlashcardDatabase, study_manager: StudyManager = None):
@@ -43,6 +46,7 @@ class SentenceMiningView(ttk.Frame):
         self.current_view_sentences = []
         self.selected_sentence = None
         self.mining_result = None
+        self._embedding_cache = {}  # lemma -> list[float]
 
         self.setup_ui()
         
@@ -103,6 +107,11 @@ class SentenceMiningView(ttk.Frame):
         self.combo_sort = ttk.Combobox(filter_frame, textvariable=self.sort_mode, values=["Order", "Difficulty (Low)", "Difficulty (High)", "Unknowns"], width=15, state="readonly")
         self.combo_sort.pack(side="left", padx=2)
         self.combo_sort.bind("<<ComboboxSelected>>", lambda e: self.filter_sentences())
+        
+        ttk.Separator(filter_frame, orient="vertical").pack(side="left", padx=10, fill="y")
+        
+        self.btn_reweight = ttk.Button(filter_frame, text="🧠 Reweight via Semantics", command=self.reweight_via_semantics)
+        self.btn_reweight.pack(side="left", padx=5)
         
         self.tree_sentences = ttk.Treeview(
             self.tab_list, columns=("Text", "Level", "Difficulty", "Category"), show="headings"
@@ -347,6 +356,98 @@ class SentenceMiningView(ttk.Frame):
             s.level = len(new_unknown)
             
         self.filter_sentences()
+
+    def reweight_via_semantics(self):
+        """Trigger on-demand semantic topic familiarity scoring."""
+        if not self.mining_result:
+            return
+
+        # 1. Setup services
+        visualizer = SemanticVisualizer(self.db)
+        is_ok, msg = visualizer.check_dependencies()
+        if not is_ok:
+            messagebox.showwarning("Dependencies Missing", msg)
+            return
+
+        # 2. Get Cluster Profiles
+        profiles = visualizer.get_cluster_profiles()
+        if not profiles:
+            messagebox.showinfo("No Data", "You need to have some flashcards with embeddings to use this feature. Visit the 'Vocabulary galaxy' in the Dashboard first or click 'Generate Map' there.")
+            return
+
+        # 3. Gather unique lemmas needing embeddings
+        all_lemmas = set()
+        for s in self.mining_result.sentences:
+            for t in s.tokens:
+                if not self.miner._is_punctuation(t.lemma):
+                    lemma = t.lemma.lower()
+                    if lemma not in self._embedding_cache:
+                        all_lemmas.add(lemma)
+        
+        # 4. Fetch missing embeddings (in background? For now sync with wait cursor)
+        self.config(cursor="watch")
+        self.btn_reweight.config(state="disabled")
+        self.update()
+        
+        try:
+            if all_lemmas:
+                ai_client = get_ai_client()
+                lemmas_list = list(all_lemmas)
+                # Batch process embeddings
+                batch_size = 50
+                for i in range(0, len(lemmas_list), batch_size):
+                    batch = lemmas_list[i : i + batch_size]
+                    embeddings = ai_client.generate_embeddings(batch)
+                    if embeddings:
+                        for lemma, emb in zip(batch, embeddings):
+                            self._embedding_cache[lemma] = emb
+            
+            # 5. Score sentences
+            fam_scorer = SemanticFamiliarityScorer(profiles)
+            difficulty_scorer = self._get_difficulty_scorer()
+            if not difficulty_scorer:
+                return
+
+            for s in self.mining_result.sentences:
+                # Get embeddings for this sentence's tokens
+                sent_embeddings = []
+                for t in s.tokens:
+                    lemma = t.lemma.lower()
+                    if lemma in self._embedding_cache:
+                        sent_embeddings.append(self._embedding_cache[lemma])
+                
+                if sent_embeddings:
+                    familiarity = fam_scorer.score_words(sent_embeddings)
+                    # We need the original SentenceScore to call reweight_with_semantics.
+                    # Since we don't store it in SentenceResult, we'll re-calculate or 
+                    # use the data we have. 
+                    # Actually, SentenceMiningView doesn't store the SentenceScore object,
+                    # just the float difficulty_score.
+                    
+                    # Refactor: We need a way to re-score. 
+                    # Let's add a method to difficulty_scorer that just does the math if we have text.
+                    # Or better, let's just use the features we HAVE if they were stored.
+                    # Wait, SentenceResult doesn't have the features dict.
+                    
+                    # Okay, let's re-score the sentence fully once more with the new provider? 
+                    # No, we want on-demand re-weighting without re-tokenizing.
+                    
+                    # Let's grab the score using the existing text (fast since tokens/recall are cached in scorer usually)
+                    original_score = difficulty_scorer.score_sentence(s.text, self.lang_code)
+                    new_score = difficulty_scorer.reweight_with_semantics(original_score, familiarity)
+                    
+                    s.difficulty_score = new_score.difficulty_score
+                    s.category = new_score.difficulty_category
+
+            # 6. Refresh
+            self.filter_sentences()
+            messagebox.showinfo("Complete", "Sentences have been reweighted based on your topic familiarity.\nSentences in familiar topics are now easier.")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Semantic reweighting failed: {e}")
+        finally:
+            self.config(cursor="")
+            self.btn_reweight.config(state="normal")
 
     def refresh_unknown_panel(self):
         if not hasattr(self, 'mining_result'): return

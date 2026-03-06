@@ -75,7 +75,7 @@ def test_miner_with_scorer(temp_db, tokenizer, freq_list):
     assert 0 <= first.difficulty_score <= 1
     assert first.category is not None
     assert first.category in (
-        "learned", "review", "somewhat_novel", "stretch", "too_advanced"
+        "mastered", "review", "sweet_spot", "stretch", "too_hard"
     )
 
 

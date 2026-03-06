@@ -5,6 +5,10 @@ flask>=2.0.0
 
 # AI / LLM
 requests>=2.25.0
+sentence-transformers>=2.2.0
+scikit-learn>=1.0.0
+umap-learn>=0.5.0
+plotly>=5.0.0
 
 # Google Drive Sync
 google-auth>=2.0.0

@@ -12,6 +12,7 @@ from src.services.llm_providers.ollama_provider import OllamaProvider
 from src.services.llm_providers.openai_compatible import OpenAICompatibleProvider
 from src.services.llm_providers.gemini_provider import GeminiProvider
 from src.services.llm_providers.security import KeyringManager
+from src.services.llm_providers.local_embeddings import LocalEmbeddingProvider
 from src.core.config import config as app_config
 
 class LLMService:
@@ -101,10 +102,24 @@ class LLMService:
         return None
 
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Unified method for generating embeddings."""
+        """Unified method for generating embeddings with local fallback."""
+        if not texts:
+            return []
+            
+        embeddings = []
         if self.provider:
-            return self.provider.generate_embeddings(texts)
-        return []
+            try:
+                embeddings = self.provider.generate_embeddings(texts)
+            except Exception as e:
+                print(f"[LLMService] Provider embedding error: {e}")
+        
+        # Fallback if primary provider failed or is not available
+        if not embeddings:
+            if not hasattr(self, '_local_embeddings'):
+                self._local_embeddings = LocalEmbeddingProvider()
+            embeddings = self._local_embeddings.generate_embeddings(texts)
+            
+        return embeddings
 
     def preload_model(self, model_name: str = None) -> bool:
         if self.provider:

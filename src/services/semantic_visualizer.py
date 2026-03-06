@@ -1,20 +1,21 @@
 import json
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime
 from src.core.database import FlashcardDatabase
 from src.services.llm_service import get_ai_client
 
-try:
-    from sklearn.cluster import KMeans, DBSCAN
-    from sklearn.metrics import silhouette_score
-    import umap
-    import plotly.express as px
-    import plotly.graph_objects as go
-    DEPENDENCIES_AVAILABLE = True
-except ImportError:
-    DEPENDENCIES_AVAILABLE = False
+import importlib.util
+
+def _check_deps():
+    deps = ['sklearn', 'umap', 'plotly']
+    for d in deps:
+        if importlib.util.find_spec(d) is None:
+            return False
+    return True
+
+DEPENDENCIES_AVAILABLE = _check_deps()
 
 class SemanticVisualizer:
     """
@@ -95,6 +96,7 @@ class SemanticVisualizer:
         embeddings = np.array([json.loads(c.embedding_vector) for c in valid_cards])
         
         # Reduce dimensions to 2D
+        import umap
         reducer = umap.UMAP(n_neighbors=min(len(valid_cards)-1, 15), min_dist=0.1, random_state=42)
         embedding_2d = reducer.fit_transform(embeddings)
 
@@ -109,70 +111,84 @@ class SemanticVisualizer:
         })
 
         # Perform clustering
+        from sklearn.cluster import KMeans
         n_clusters = max(2, min(len(valid_cards) // 5, 10))
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         df['cluster'] = kmeans.fit_predict(embeddings)
         
         return df
 
-    def get_semantic_analysis(self, df: pd.DataFrame) -> Dict:
-        """
-        Identify weak, strong, and adjacent areas based on cluster density and accuracy.
-        """
-        if df.empty:
-            return {}
+        return analysis
 
-        cluster_stats = df.groupby('cluster').agg({
+    def get_cluster_profiles(self, deck_id: Optional[int] = None) -> List[Any]:
+        """Extract cluster centroids + strength for use by SemanticFamiliarityScorer."""
+        from src.services.text.semantic_familiarity import ClusterProfile
+        
+        df = self.generate_map_data(deck_id)
+        if df is None or df.empty:
+            return []
+
+        # We need the original embeddings (which generate_map_data used)
+        # To avoid re-fetching, we'll re-run a bit of logic or refactor.
+        # For now, let's fetch again for simplicity in this method.
+        decks = self.db.get_all_decks()
+        cards = []
+        for deck in decks:
+            if deck_id is None or deck['id'] == deck_id:
+                cards.extend(self.db.get_all_flashcards(deck['id']))
+        
+        valid_cards = [c for c in cards if c.embedding_vector]
+        if not valid_cards:
+            return []
+
+        embeddings = np.array([json.loads(c.embedding_vector) for c in valid_cards])
+        
+        # KMeans is already run in generate_map_data but the results aren't persisted 
+        # outside the DataFrame. We'll re-run it briefly.
+        from sklearn.cluster import KMeans
+        n_clusters = max(2, min(len(valid_cards) // 5, 10))
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        labels = kmeans.fit_predict(embeddings)
+        centroids = kmeans.cluster_centers_
+        
+        # Calculate strength (density + accuracy) per cluster
+        df_temp = pd.DataFrame({
+            'cluster': labels,
+            'accuracy': [c.get_accuracy() for c in valid_cards],
+            'word': [c.question for c in valid_cards]
+        })
+        
+        cluster_stats = df_temp.groupby('cluster').agg({
             'accuracy': 'mean',
             'word': 'count'
         }).rename(columns={'word': 'density'})
-
-        # Find strong areas (high density, high accuracy)
-        strong_clusters = cluster_stats[
-            (cluster_stats['density'] >= cluster_stats['density'].median()) & 
-            (cluster_stats['accuracy'] >= 70)
-        ].index.tolist()
-
-        # Find weak areas (low density or low accuracy)
-        weak_clusters = cluster_stats[
-            (cluster_stats['density'] < cluster_stats['density'].median()) | 
-            (cluster_stats['accuracy'] < 50)
-        ].index.tolist()
-
-        # Find adjacent areas (near strong clusters but not quite in them)
-        # This is a bit complex without the full high-dim space, but we can 
-        # look for clusters that are "small" but near "large" ones in 2D space.
-        # For simplicity, we'll just return the cluster summaries.
         
-        analysis = {
-            'strong_areas': [],
-            'weak_areas': [],
-            'adjacent_areas': []
-        }
-
-        for cluster_id in strong_clusters:
-            words = df[df['cluster'] == cluster_id]['word'].tolist()[:5]
-            analysis['strong_areas'].append({
-                'id': int(cluster_id),
-                'sample_words': words,
-                'accuracy': float(cluster_stats.loc[cluster_id, 'accuracy'])
-            })
-
-        for cluster_id in weak_clusters:
-            words = df[df['cluster'] == cluster_id]['word'].tolist()[:5]
-            analysis['weak_areas'].append({
-                'id': int(cluster_id),
-                'sample_words': words,
-                'accuracy': float(cluster_stats.loc[cluster_id, 'accuracy'])
-            })
-
-        return analysis
+        max_density = cluster_stats['density'].max() if not cluster_stats.empty else 1
+        
+        profiles = []
+        for i, centroid in enumerate(centroids):
+            accuracy = cluster_stats.loc[i, 'accuracy'] / 100.0 # 0-1
+            density = min(1.0, cluster_stats.loc[i, 'density'] / (max_density or 1))
+            
+            # Strength = blend of density and performance
+            strength = (accuracy * 0.7) + (density * 0.3)
+            
+            sample_words = df_temp[df_temp['cluster'] == i]['word'].tolist()[:5]
+            
+            profiles.append(ClusterProfile(
+                centroid=centroid,
+                strength=strength,
+                sample_words=sample_words
+            ))
+            
+        return profiles
 
     def export_interactive_map(self, df: pd.DataFrame, output_path: str = "vocab_map.html"):
         """Export the Plotly visualization to an HTML file."""
         if df.empty:
             return
 
+        import plotly.express as px
         fig = px.scatter(
             df, x='x', y='y',
             text='word',
