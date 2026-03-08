@@ -279,8 +279,9 @@ class DashboardApp:
         
         def _run():
             try:
-                # Run the script
-                result = subprocess.run([sys.executable, script_path, "--output", output_path], capture_output=True, text=True)
+                # Run the script with language filtering
+                lang = self.study_manager.study_language
+                result = subprocess.run([sys.executable, script_path, "--output", output_path, "--language", lang], capture_output=True, text=True)
                 if result.returncode == 0:
                     # Open the result in browser
                     webbrowser.open(f"file:///{output_path}")

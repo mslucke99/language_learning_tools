@@ -40,9 +40,6 @@ class SemanticVisualizer:
         if deck_id:
             cards = self.db.get_all_flashcards(deck_id)
         else:
-            # This is a bit inefficient if there are many decks, but get_all_flashcards is deck-based.
-            # I'll need a way to get ALL flashcards across all decks.
-            # Let's assume for now we use all decks if deck_id is None.
             decks = self.db.get_all_decks()
             cards = []
             for deck in decks:
@@ -66,96 +63,230 @@ class SemanticVisualizer:
                 
             for card, embedding in zip(batch, embeddings):
                 card.embedding_vector = json.dumps(embedding)
-                # Attempt to get a basic category if possible (Phase 1 Low-cost)
-                # For now we'll leave category as None or use a placeholder
                 self.db.update_flashcard(card)
                 processed_count += 1
                 
         return processed_count
 
-    def generate_map_data(self, deck_id: Optional[int] = None) -> Optional[pd.DataFrame]:
+    def process_known_words(self, language: Optional[str] = None) -> int:
+        """
+        Generate embeddings for known_words that don't have them yet.
+        Returns the number of processed words.
+        """
+        words = self.db.get_all_known_words(language)
+        words_to_process = [w for w in words if not w.get('embedding_vector')]
+        
+        if not words_to_process:
+            return 0
+            
+        # Process in batches
+        batch_size = 50
+        processed_count = 0
+        
+        for i in range(0, len(words_to_process), batch_size):
+            batch = words_to_process[i:i + batch_size]
+            texts = [w['lemma'] for w in batch]
+            
+            embeddings = self.ai_client.generate_embeddings(texts)
+            if not embeddings:
+                continue
+                
+            for word, embedding in zip(batch, embeddings):
+                self.db.update_known_word_embedding(word['id'], json.dumps(embedding))
+                processed_count += 1
+                
+        return processed_count
+
+    def generate_map_data(self, deck_id: Optional[int] = None, language: Optional[str] = None) -> Optional[pd.DataFrame]:
         """
         Load embeddings from DB, run UMAP, and return a DataFrame with X, Y coordinates.
+        Combines flashcards and known words.
         """
         is_ok, msg = self.check_dependencies()
         if not is_ok:
             print(f"[SemanticVisualizer] {msg}")
             return None
 
-        # Fetch all cards with embeddings
+        # Fetch flashcards
         decks = self.db.get_all_decks()
         cards = []
         for deck in decks:
             if deck_id is None or deck['id'] == deck_id:
                 cards.extend(self.db.get_all_flashcards(deck['id']))
         
+        # Filter for only those with embeddings
         valid_cards = [c for c in cards if c.embedding_vector]
-        if len(valid_cards) < 5: # UMAP needs some data
+        
+        # Fetch known_words
+        # If deck_id is specified, we might not want all known_words, 
+        # but usually deck_id=None means "process everything".
+        target_lang = language
+        if deck_id and not target_lang:
+            for deck in decks:
+                if deck['id'] == deck_id:
+                    target_lang = deck.get('language')
+                    break
+        
+        # Filter flashcards by language if target_lang is defined
+        if target_lang:
+            filtered_cards = []
+            for c in valid_cards:
+                # Find deck for this card to check language
+                for deck in decks:
+                    if deck['id'] == c.deck_id:
+                        if deck.get('language') == target_lang:
+                            filtered_cards.append(c)
+                        break
+            valid_cards = filtered_cards
+
+        known_words = self.db.get_all_known_words(target_lang)
+        valid_known = [w for w in known_words if w.get('embedding_vector')]
+        
+        if len(valid_cards) + len(valid_known) < 5: # UMAP needs some data
             return None
 
-        embeddings = np.array([json.loads(c.embedding_vector) for c in valid_cards])
+        # Combine data
+        combined_data = []
+        for c in valid_cards:
+            combined_data.append({
+                'id': f"fc_{c.id}",
+                'word': c.question,
+                'translation': c.answer,
+                'accuracy': c.get_accuracy(),
+                'embedding': json.loads(c.embedding_vector),
+                'type': 'Flashcard'
+            })
+            
+        for w in valid_known:
+            combined_data.append({
+                'id': f"kw_{w['id']}",
+                'word': w['lemma'],
+                'translation': f"Known ({w['source']})",
+                'accuracy': 100.0, # Assumed known
+                'embedding': json.loads(w['embedding_vector']),
+                'type': 'Known Word'
+            })
+
+        embeddings = np.array([d['embedding'] for d in combined_data])
         
         # Reduce dimensions to 2D
         import umap
-        reducer = umap.UMAP(n_neighbors=min(len(valid_cards)-1, 15), min_dist=0.1, random_state=42)
+        reducer = umap.UMAP(n_neighbors=min(len(combined_data)-1, 15), min_dist=0.1, random_state=42)
         embedding_2d = reducer.fit_transform(embeddings)
 
         # Create DataFrame
         df = pd.DataFrame({
-            'id': [c.id for c in valid_cards],
-            'word': [c.question for c in valid_cards],
-            'translation': [c.answer for c in valid_cards],
+            'id': [d['id'] for d in combined_data],
+            'word': [d['word'] for d in combined_data],
+            'translation': [d['translation'] for d in combined_data],
             'x': embedding_2d[:, 0],
             'y': embedding_2d[:, 1],
-            'accuracy': [c.get_accuracy() for c in valid_cards]
+            'accuracy': [d['accuracy'] for d in combined_data],
+            'type': [d['type'] for d in combined_data]
         })
 
         # Perform clustering
         from sklearn.cluster import KMeans
-        n_clusters = max(2, min(len(valid_cards) // 5, 10))
+        n_clusters = max(2, min(len(combined_data) // 5, 10))
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         df['cluster'] = kmeans.fit_predict(embeddings)
         
         return df
 
-        return analysis
+    def get_semantic_analysis(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze clusters to find strong and weak areas."""
+        if df is None or df.empty:
+            return {"strong_areas": [], "weak_areas": []}
 
-    def get_cluster_profiles(self, deck_id: Optional[int] = None) -> List[Any]:
+        # Calculate cluster stats
+        cluster_stats = df.groupby('cluster').agg({
+            'accuracy': 'mean',
+            'word': 'count'
+        }).rename(columns={'word': 'density'})
+
+        strong = []
+        weak = []
+
+        for cluster_id, stats in cluster_stats.iterrows():
+            words = df[df['cluster'] == cluster_id]['word'].tolist()[:5]
+            area_info = {
+                "cluster_center": cluster_id,
+                "representative_words": words,
+                "accuracy": stats['accuracy'],
+                "density": stats['density']
+            }
+            if stats['accuracy'] >= 80:
+                strong.append(area_info)
+            elif stats['accuracy'] <= 40:
+                weak.append(area_info)
+
+        return {
+            "strong_areas": strong,
+            "weak_areas": weak
+        }
+
+    def get_cluster_profiles(self, deck_id: Optional[int] = None, language: Optional[str] = None) -> List[Any]:
         """Extract cluster centroids + strength for use by SemanticFamiliarityScorer."""
         from src.services.text.semantic_familiarity import ClusterProfile
         
-        df = self.generate_map_data(deck_id)
+        # Use our updated combined data
+        df = self.generate_map_data(deck_id, language)
         if df is None or df.empty:
             return []
 
-        # We need the original embeddings (which generate_map_data used)
-        # To avoid re-fetching, we'll re-run a bit of logic or refactor.
-        # For now, let's fetch again for simplicity in this method.
+        # Re-fetch embeddings to avoid re-calculating UMAP here
+        # (This is a bit duplicate but avoids large structural changes for now)
         decks = self.db.get_all_decks()
+        
+        # Filter flashcards
         cards = []
         for deck in decks:
             if deck_id is None or deck['id'] == deck_id:
                 cards.extend(self.db.get_all_flashcards(deck['id']))
-        
         valid_cards = [c for c in cards if c.embedding_vector]
-        if not valid_cards:
+        
+        # Filter known words
+        target_lang = language
+        if deck_id and not target_lang:
+            for deck in decks:
+                if deck['id'] == deck_id:
+                    target_lang = deck.get('language')
+                    break
+        known_words = self.db.get_all_known_words(target_lang)
+        valid_known = [w for w in known_words if w.get('embedding_vector')]
+        
+        if not valid_cards and not valid_known:
             return []
 
-        embeddings = np.array([json.loads(c.embedding_vector) for c in valid_cards])
+        # Combine embeddings
+        embeddings = []
+        accuracies = []
+        words = []
         
-        # KMeans is already run in generate_map_data but the results aren't persisted 
-        # outside the DataFrame. We'll re-run it briefly.
+        for c in valid_cards:
+            embeddings.append(json.loads(c.embedding_vector))
+            accuracies.append(c.get_accuracy())
+            words.append(c.question)
+            
+        for w in valid_known:
+            embeddings.append(json.loads(w['embedding_vector']))
+            accuracies.append(100.0)
+            words.append(w['lemma'])
+            
+        embeddings_arr = np.array(embeddings)
+        
+        # KMeans
         from sklearn.cluster import KMeans
-        n_clusters = max(2, min(len(valid_cards) // 5, 10))
+        n_clusters = max(2, min(len(embeddings) // 5, 10))
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-        labels = kmeans.fit_predict(embeddings)
+        labels = kmeans.fit_predict(embeddings_arr)
         centroids = kmeans.cluster_centers_
         
-        # Calculate strength (density + accuracy) per cluster
+        # Calculate stats per cluster
         df_temp = pd.DataFrame({
             'cluster': labels,
-            'accuracy': [c.get_accuracy() for c in valid_cards],
-            'word': [c.question for c in valid_cards]
+            'accuracy': accuracies,
+            'word': words
         })
         
         cluster_stats = df_temp.groupby('cluster').agg({
@@ -192,15 +323,16 @@ class SemanticVisualizer:
         fig = px.scatter(
             df, x='x', y='y',
             text='word',
-            color='cluster',
-            hover_data=['translation', 'accuracy'],
+            color='type', # Use type for color instead of cluster ID for better intuition
+            hover_data=['translation', 'accuracy', 'cluster'],
             title="Semantic Vocabulary Galaxy",
-            template="plotly_dark"
+            template="plotly_dark",
+            labels={'type': 'Vocabulary Type'}
         )
         
         fig.update_traces(textposition='top center')
         fig.update_layout(
-            showlegend=False,
+            showlegend=True,
             xaxis_title=None,
             yaxis_title=None,
             xaxis_visible=False,

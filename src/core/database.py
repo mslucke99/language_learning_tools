@@ -465,7 +465,18 @@ class FlashcardDatabase:
             print("[DB] Migrating imported_content: adding category")
             cursor.execute("ALTER TABLE imported_content ADD COLUMN category TEXT")
 
-        # 7. Create known_words table for Sentence Mining
+        # Add embedding_vector and category to known_words if they don't exist
+        cursor.execute("PRAGMA table_info(known_words)")
+        columns = [info[1] for info in cursor.fetchall()]
+        if columns: # Only if table exists
+            if 'embedding_vector' not in columns:
+                print("[DB] Migrating known_words: adding embedding_vector")
+                cursor.execute("ALTER TABLE known_words ADD COLUMN embedding_vector BLOB")
+            if 'category' not in columns:
+                print("[DB] Migrating known_words: adding category")
+                cursor.execute("ALTER TABLE known_words ADD COLUMN category TEXT")
+
+        # Create known_words table for Sentence Mining
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS known_words (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -473,6 +484,8 @@ class FlashcardDatabase:
                 language TEXT NOT NULL,
                 source TEXT DEFAULT 'user',   -- 'frequency', 'flashcard', 'user', 'mining'
                 added_at TEXT NOT NULL,
+                embedding_vector BLOB,
+                category TEXT,
                 UNIQUE(lemma, language)
             )
         """)
@@ -702,12 +715,12 @@ class FlashcardDatabase:
         """Get all flashcards in a deck."""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category, pronunciation_flag FROM flashcards WHERE deck_id = ? ORDER BY id",
+            "SELECT id, question, answer, last_reviewed, easiness, interval, repetitions, total_reviews, correct_reviews, embedding_vector, category, pronunciation_flag, deck_id FROM flashcards WHERE deck_id = ? ORDER BY id",
             (deck_id,)
         )
         flashcards = []
         for row in cursor.fetchall():
-            flashcard = Flashcard(row[1], row[2], card_id=row[0])
+            flashcard = Flashcard(row[1], row[2], card_id=row[0], deck_id=row[12])
             flashcard.last_reviewed = datetime.fromisoformat(row[3]) if row[3] else None
             flashcard.easiness = row[4]
             flashcard.interval = row[5]
@@ -1470,14 +1483,29 @@ class FlashcardDatabase:
         cursor.execute("SELECT COUNT(*) FROM known_words WHERE language = ?", (language,))
         return cursor.fetchone()[0]
 
-    def get_all_known_words(self, language: str) -> list[dict]:
-        """Get all known words for a language."""
+    def get_all_known_words(self, language: str = None) -> list[dict]:
+        """Get all known words for a language, or all languages if None."""
+        cursor = self.conn.cursor()
+        if language:
+            cursor.execute(
+                "SELECT id, lemma, source, added_at, embedding_vector, category, language FROM known_words WHERE language = ? ORDER BY lemma",
+                (language,)
+            )
+        else:
+            cursor.execute(
+                "SELECT id, lemma, source, added_at, embedding_vector, category, language FROM known_words ORDER BY lemma"
+            )
+        return [{"id": r[0], "lemma": r[1], "source": r[2], "added_at": r[3], "embedding_vector": r[4], "category": r[5], "language": r[6]} for r in cursor.fetchall()]
+
+    def update_known_word_embedding(self, word_id: int, embedding_vector: bytes, category: str = None) -> bool:
+        """Update a known word's embedding and category."""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT id, lemma, source, added_at FROM known_words WHERE language = ? ORDER BY lemma",
-            (language,)
+            "UPDATE known_words SET embedding_vector = ?, category = ? WHERE id = ?",
+            (embedding_vector, category, word_id)
         )
-        return [{"id": r[0], "lemma": r[1], "source": r[2], "added_at": r[3]} for r in cursor.fetchall()]
+        self.conn.commit()
+        return cursor.rowcount > 0
 
     def get_user_recall_data(self, language: str) -> Dict[str, float]:
         """

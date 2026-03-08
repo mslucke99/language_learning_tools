@@ -1,8 +1,9 @@
 from datetime import datetime
 
 class Flashcard:
-    def __init__(self, question: str, answer: str, card_id: int = None):
+    def __init__(self, question: str, answer: str, card_id: int = None, deck_id: int = None):
         self.id = card_id
+        self.deck_id = deck_id
         self.question = question
         self.answer = answer
         self.last_reviewed = None  # datetime

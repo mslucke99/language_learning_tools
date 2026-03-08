@@ -369,10 +369,10 @@ class SentenceMiningView(ttk.Frame):
             messagebox.showwarning("Dependencies Missing", msg)
             return
 
-        # 2. Get Cluster Profiles
-        profiles = visualizer.get_cluster_profiles()
+        # 2. Get Cluster Profiles (including known_words and flashcards for this language)
+        profiles = visualizer.get_cluster_profiles(language=self.lang_code)
         if not profiles:
-            messagebox.showinfo("No Data", "You need to have some flashcards with embeddings to use this feature. Visit the 'Vocabulary galaxy' in the Dashboard first or click 'Generate Map' there.")
+            messagebox.showinfo("No Data", "You need to have some flashcards or known words with embeddings to use this feature. Visit the 'Vocabulary galaxy' in the Dashboard first or click 'Generate Map' there.")
             return
 
         # 3. Gather unique lemmas needing embeddings
