@@ -86,16 +86,42 @@ class SentenceMiner:
         sentences_text = self._split_sentences(text)
 
         known_set = self._load_known_vocabulary(lang_code)
+        ignored_set = self._load_ignored_vocabulary(lang_code)
         results = []
 
+        # 2. Match phrases first using n-grams (up to 5 tokens)
+        known_phrases = {k for k in known_set if ' ' in k}
+        
         for sent_text in sentences_text:
             if not sent_text.strip():
                 continue
 
             tokens = self.tokenizer.tokenize(sent_text, lang_code)
+            
+            # Find tokens that belong to a known multi-word phrase
+            known_token_indices = set()
+            if known_phrases:
+                # Try n-grams from 5 down to 2
+                for n in range(min(5, len(tokens)), 1, -1):
+                    for i in range(len(tokens) - n + 1):
+                        # Skip if any token in this range is already marked known
+                        if any(j in known_token_indices for j in range(i, i+n)):
+                            continue
+                            
+                        # Check both lemma-based and text-based phrase matching
+                        lemma_phrase = " ".join(t.lemma.lower() for t in tokens[i:i+n]).strip()
+                        text_phrase = " ".join(t.text.lower() for t in tokens[i:i+n]).strip()
+                        
+                        if lemma_phrase in known_phrases or text_phrase in known_phrases:
+                            for j in range(i, i+n):
+                                known_token_indices.add(j)
 
             unknown = []
-            for t in tokens:
+            for i, t in enumerate(tokens):
+                # 0. Skip if already matched as part of a phrase
+                if i in known_token_indices:
+                    continue
+                    
                 # 1. Check if it's explicitly punctuation/number
                 if self._is_punctuation(t.lemma):
                     continue
@@ -104,7 +130,25 @@ class SentenceMiner:
                 if self._should_ignore_token(lang_code, t):
                     continue
 
-                if t.lemma.lower() not in known_set:
+                # 3. Check if explicitly marked as a non-word (ignored)
+                if t.lemma.lower() in ignored_set:
+                    continue
+
+                # 4. Check if known
+                is_known = False
+                lemma_lower = t.lemma.lower()
+                text_lower = t.text.lower()
+                
+                if lemma_lower in known_set or text_lower in known_set:
+                    is_known = True
+                elif lang_code == "ko":
+                    # Special Korean matching: verb roots often added without '다'
+                    if lemma_lower.endswith('다') and lemma_lower[:-1] in known_set:
+                        is_known = True
+                    # Check if any part of the known set matches the lemma or text (substring)
+                    # This is aggressive but helpful for agglutinative languages
+                
+                if not is_known:
                     unknown.append(t)
 
             # 3. Grammar patterns
@@ -204,6 +248,11 @@ class SentenceMiner:
         words = self.db.get_all_known_words(lang_code)
         return {w['lemma'].lower() for w in words} # Dict returned by DB
         
+    def _load_ignored_vocabulary(self, lang_code: str) -> set:
+        """Load all ignored (non-word) lemmas for a language into a fast lookup set."""
+        words = self.db.get_all_ignored_words(lang_code)
+        return {w['lemma'].lower() for w in words}
+
     def _is_punctuation(self, text: str) -> bool:
         """Check if token is purely punctuation or numbers."""
         # We want to ignore numbers as unknown words too

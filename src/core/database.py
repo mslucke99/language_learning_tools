@@ -475,6 +475,9 @@ class FlashcardDatabase:
             if 'category' not in columns:
                 print("[DB] Migrating known_words: adding category")
                 cursor.execute("ALTER TABLE known_words ADD COLUMN category TEXT")
+            if 'is_ignored' not in columns:
+                print("[DB] Migrating known_words: adding is_ignored")
+                cursor.execute("ALTER TABLE known_words ADD COLUMN is_ignored INTEGER DEFAULT 0")
 
         # Create known_words table for Sentence Mining
         cursor.execute("""
@@ -482,10 +485,11 @@ class FlashcardDatabase:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 lemma TEXT NOT NULL,
                 language TEXT NOT NULL,
-                source TEXT DEFAULT 'user',   -- 'frequency', 'flashcard', 'user', 'mining'
+                source TEXT DEFAULT 'user',   -- 'frequency', 'flashcard', 'user', 'mining', 'ignored'
                 added_at TEXT NOT NULL,
                 embedding_vector BLOB,
                 category TEXT,
+                is_ignored INTEGER DEFAULT 0,
                 UNIQUE(lemma, language)
             )
         """)
@@ -551,6 +555,224 @@ class FlashcardDatabase:
             )
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_story_templates_genre ON story_templates(genre)")
+
+        # 11. Create reading_sessions table for Immersive Reading Mode
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS reading_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                language TEXT NOT NULL,
+                
+                -- Content metadata
+                source TEXT NOT NULL,  -- 'user_paste', 'user_file'
+                import_method TEXT NOT NULL,  -- 'paste', 'file'
+                content_type TEXT,  -- 'article', 'story', 'chapter', 'dialogue'
+                difficulty_score REAL,
+                difficulty_rating TEXT,  -- 'easy', 'medium', 'hard'
+                word_count INTEGER,
+                estimated_minutes INTEGER,
+                
+                -- Legal compliance
+                legal_attestation BOOLEAN NOT NULL DEFAULT 0,
+                import_ip_address TEXT,
+                import_user_agent TEXT,
+                
+                -- Privacy enforcement
+                private BOOLEAN NOT NULL DEFAULT 1,
+                shareable BOOLEAN NOT NULL DEFAULT 0,
+                
+                -- Timestamps
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_read_at TIMESTAMP,
+                
+                -- Constraints
+                CHECK (private = 1),
+                CHECK (shareable = 0),
+                CHECK (legal_attestation = 1)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_reading_sessions_user ON reading_sessions(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_reading_sessions_language ON reading_sessions(language)")
+
+        # 12. Create reading_progress table for tracking reading progress
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS reading_progress (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                
+                -- Position tracking
+                current_position INTEGER DEFAULT 0,  -- Character offset
+                current_paragraph INTEGER DEFAULT 0,  -- Paragraph index
+                completion_percentage REAL DEFAULT 0.0,
+                
+                -- Time tracking
+                time_spent_seconds INTEGER DEFAULT 0,
+                
+                -- Completion
+                completed BOOLEAN DEFAULT 0,
+                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                FOREIGN KEY (session_id) REFERENCES reading_sessions(id) ON DELETE CASCADE,
+                UNIQUE(session_id, user_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_reading_progress_session ON reading_progress(session_id)")
+
+        # 13. Create reading_lookups table for word and sentence lookups
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS reading_lookups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                
+                -- Lookup details
+                lookup_type TEXT NOT NULL,  -- 'word' or 'sentence'
+                word TEXT,  -- For word lookups
+                sentence TEXT,  -- For sentence lookups
+                sentence_context TEXT NOT NULL,  -- Sentence containing the word
+                paragraph_context TEXT,  -- Surrounding paragraph
+                
+                -- Definition/explanation
+                definition TEXT,  -- Cached definition or explanation
+                
+                -- Tracking
+                lookup_count INTEGER DEFAULT 1,  -- Times looked up in this session
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                FOREIGN KEY (session_id) REFERENCES reading_sessions(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_reading_lookups_session ON reading_lookups(session_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_reading_lookups_word ON reading_lookups(word)")
+
+        # 14. Create reading_definition_cache table for performance
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS reading_definition_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                word TEXT NOT NULL,
+                language TEXT NOT NULL,
+                context_hash TEXT NOT NULL,  -- Hash of sentence/paragraph for context-specific caching
+                
+                -- Definition content
+                definition TEXT NOT NULL,
+                synonym TEXT,
+                example_sentence TEXT,
+                
+                -- Cache management
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                access_count INTEGER DEFAULT 1,
+                last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(word, language, context_hash)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_definition_cache_lookup ON reading_definition_cache(word, language, context_hash)")
+
+        # 15. Create reading_annotations table for highlights, notes, and bookmarks
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS reading_annotations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                
+                -- Position
+                start_position INTEGER NOT NULL,
+                end_position INTEGER NOT NULL,
+                highlighted_text TEXT,
+                
+                -- Annotation details
+                annotation_type TEXT NOT NULL,  -- 'highlight', 'note', 'bookmark'
+                note_text TEXT,
+                
+                -- Timestamps
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                FOREIGN KEY (session_id) REFERENCES reading_sessions(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_reading_annotations_session ON reading_annotations(session_id)")
+
+        # 16. Create reading_comprehension table for comprehension questions
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS reading_comprehension (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                
+                -- Question details
+                paragraph_index INTEGER,
+                question TEXT NOT NULL,
+                question_type TEXT,  -- 'main_idea', 'detail', 'inference'
+                
+                -- Answer options (multiple choice)
+                choice_a TEXT,
+                choice_b TEXT,
+                choice_c TEXT,
+                choice_d TEXT,
+                correct_answer TEXT NOT NULL,
+                
+                -- User response
+                user_answer TEXT,
+                is_correct BOOLEAN,
+                
+                -- Timestamps
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                FOREIGN KEY (session_id) REFERENCES reading_sessions(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_reading_comprehension_session ON reading_comprehension(session_id)")
+
+        # 17. Create reading_terms_acceptance table for legal compliance
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS reading_terms_acceptance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                terms_version TEXT NOT NULL,
+                accepted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ip_address TEXT,
+                user_agent TEXT
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_terms_acceptance_user ON reading_terms_acceptance(user_id)")
+
+        # 18. Create database triggers for legal compliance enforcement
+        # Ensure all reading sessions are private and non-shareable
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS enforce_privacy_on_insert
+            BEFORE INSERT ON reading_sessions
+            FOR EACH ROW
+            WHEN NEW.private != 1 OR NEW.shareable != 0
+            BEGIN
+                SELECT RAISE(ABORT, 'Reading sessions must be private and non-shareable');
+            END
+        """)
+
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS enforce_privacy_on_update
+            BEFORE UPDATE ON reading_sessions
+            FOR EACH ROW
+            WHEN NEW.private != 1 OR NEW.shareable != 0
+            BEGIN
+                SELECT RAISE(ABORT, 'Reading sessions must remain private and non-shareable');
+            END
+        """)
+
+        # Ensure legal attestation is always true
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS enforce_attestation_on_insert
+            BEFORE INSERT ON reading_sessions
+            FOR EACH ROW
+            WHEN NEW.legal_attestation != 1
+            BEGIN
+                SELECT RAISE(ABORT, 'Legal attestation is required for all reading sessions');
+            END
+        """)
 
         self.conn.commit()
 
@@ -680,6 +902,16 @@ class FlashcardDatabase:
     def add_flashcard(self, deck_id: int, question: str, answer: str) -> Flashcard:
         """Add a flashcard to a deck."""
         cursor = self.conn.cursor()
+        
+        # Get language for deck if available
+        cursor.execute("SELECT language FROM decks WHERE id = ?", (deck_id,))
+        row = cursor.fetchone()
+        language = row[0] if row else None
+        
+        # Mark as a known word so it doesn't appear as 'unknown' in mining
+        if language and question:
+            self.add_known_word(question, language, source='flashcard')
+
         cursor.execute(
             "INSERT INTO flashcards (deck_id, question, answer) VALUES (?, ?, ?)",
             (deck_id, question, answer)
@@ -890,6 +1122,11 @@ class FlashcardDatabase:
             self.conn.commit()
             print(f'[DB] COMMIT successful', flush=True)
             row_id = cursor.lastrowid
+            
+            # If it's a word, also mark as known so it's handled in mining
+            if content_type == 'word' and language and content:
+                self.add_known_word(content, language, source='mining_manual')
+                
             print(f'[DB] Returned row ID: {row_id}', flush=True)
             return row_id
         except Exception as e:
@@ -1444,13 +1681,19 @@ class FlashcardDatabase:
         cursor = self.conn.cursor()
         try:
             cursor.execute(
-                "INSERT INTO known_words (lemma, language, source, added_at) VALUES (?, ?, ?, ?)",
+                "INSERT INTO known_words (lemma, language, source, added_at, is_ignored) VALUES (?, ?, ?, ?, 0)",
                 (lemma.lower().strip(), language, source, datetime.now().isoformat())
             )
             self.conn.commit()
             return True
         except sqlite3.IntegrityError:
-            return False
+            # If it exists but was ignored, un-ignore it
+            cursor.execute(
+                "UPDATE known_words SET is_ignored = 0, source = ? WHERE lemma = ? AND language = ?",
+                (source, lemma.lower().strip(), language)
+            )
+            self.conn.commit()
+            return cursor.rowcount > 0
 
     def add_known_words_bulk(self, lemmas: list[str], language: str, source: str = 'user') -> int:
         """Mark multiple words as known efficiently."""
@@ -1462,7 +1705,7 @@ class FlashcardDatabase:
         data = [(lemma.lower().strip(), language, source, now) for lemma in lemmas]
         
         cursor.executemany(
-            "INSERT OR IGNORE INTO known_words (lemma, language, source, added_at) VALUES (?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO known_words (lemma, language, source, added_at, is_ignored) VALUES (?, ?, ?, ?, 0)",
             data
         )
         self.conn.commit()
@@ -1472,7 +1715,7 @@ class FlashcardDatabase:
         """Check if a word is known."""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT 1 FROM known_words WHERE lemma = ? AND language = ?",
+            "SELECT 1 FROM known_words WHERE lemma = ? AND language = ? AND (is_ignored = 0 OR is_ignored IS NULL)",
             (lemma.lower().strip(), language)
         )
         return cursor.fetchone() is not None
@@ -1480,7 +1723,7 @@ class FlashcardDatabase:
     def get_known_word_count(self, language: str) -> int:
         """Get total known words for a language."""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM known_words WHERE language = ?", (language,))
+        cursor.execute("SELECT COUNT(*) FROM known_words WHERE language = ? AND (is_ignored = 0 OR is_ignored IS NULL)", (language,))
         return cursor.fetchone()[0]
 
     def get_all_known_words(self, language: str = None) -> list[dict]:
@@ -1488,14 +1731,47 @@ class FlashcardDatabase:
         cursor = self.conn.cursor()
         if language:
             cursor.execute(
-                "SELECT id, lemma, source, added_at, embedding_vector, category, language FROM known_words WHERE language = ? ORDER BY lemma",
+                "SELECT id, lemma, source, added_at, embedding_vector, category, language FROM known_words WHERE language = ? AND (is_ignored = 0 OR is_ignored IS NULL) ORDER BY lemma",
                 (language,)
             )
         else:
             cursor.execute(
-                "SELECT id, lemma, source, added_at, embedding_vector, category, language FROM known_words ORDER BY lemma"
+                "SELECT id, lemma, source, added_at, embedding_vector, category, language FROM known_words WHERE (is_ignored = 0 OR is_ignored IS NULL) ORDER BY lemma"
             )
         return [{"id": r[0], "lemma": r[1], "source": r[2], "added_at": r[3], "embedding_vector": r[4], "category": r[5], "language": r[6]} for r in cursor.fetchall()]
+
+    def add_ignored_word(self, lemma: str, language: str) -> bool:
+        """Mark a single word as ignored (non-word)."""
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(
+                "INSERT INTO known_words (lemma, language, source, added_at, is_ignored) VALUES (?, ?, ?, ?, 1)",
+                (lemma.lower().strip(), language, 'ignored', datetime.now().isoformat())
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            # If it exists, update it to be ignored
+            cursor.execute(
+                "UPDATE known_words SET is_ignored = 1, source = 'ignored' WHERE lemma = ? AND language = ?",
+                (lemma.lower().strip(), language)
+            )
+            self.conn.commit()
+            return cursor.rowcount > 0
+
+    def get_all_ignored_words(self, language: str = None) -> list[dict]:
+        """Get all ignored words (non-words)."""
+        cursor = self.conn.cursor()
+        if language:
+            cursor.execute(
+                "SELECT id, lemma, source, added_at, language FROM known_words WHERE language = ? AND is_ignored = 1 ORDER BY lemma",
+                (language,)
+            )
+        else:
+            cursor.execute(
+                "SELECT id, lemma, source, added_at, language FROM known_words WHERE is_ignored = 1 ORDER BY lemma"
+            )
+        return [{"id": r[0], "lemma": r[1], "source": r[2], "added_at": r[3], "language": r[4]} for r in cursor.fetchall()]
 
     def update_known_word_embedding(self, word_id: int, embedding_vector: bytes, category: str = None) -> bool:
         """Update a known word's embedding and category."""

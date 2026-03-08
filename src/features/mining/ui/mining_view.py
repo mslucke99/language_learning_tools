@@ -176,6 +176,9 @@ class SentenceMiningView(ttk.Frame):
         self.btn_add_vocab = ttk.Button(btn_frame, text="📚 Add to Study", state="disabled", command=self.add_selected_to_study)
         self.btn_add_vocab.pack(side="left", fill="x", expand=True, padx=2)
         
+        self.btn_mark_non_word = ttk.Button(btn_frame, text="🚫 non-word", state="disabled", command=self.mark_selected_non_word)
+        self.btn_mark_non_word.pack(side="left", fill="x", expand=True, padx=2)
+        
         self.tree_unknown.bind("<<TreeviewSelect>>", self.on_unknown_select)
         
         # Bottom Right: Sentence Detail
@@ -507,6 +510,7 @@ class SentenceMiningView(ttk.Frame):
         has_sel = bool(sel)
         self.btn_mark_known.config(state="normal" if has_sel else "disabled")
         self.btn_add_vocab.config(state="normal" if has_sel else "disabled")
+        self.btn_mark_non_word.config(state="normal" if has_sel else "disabled")
 
     def mark_selected_known(self):
         sel = self.tree_unknown.selection()
@@ -517,6 +521,24 @@ class SentenceMiningView(ttk.Frame):
         
         # Mark known
         self.db.add_known_word(lemma, self.lang_code, source="mining_manual")
+        
+        # Remove from UI
+        self.tree_unknown.delete(item)
+        self.update_mining_levels()
+        
+        # Refresh manager if open
+        if hasattr(self, 'manager_view') and self.manager_view.winfo_exists():
+            self.manager_view.refresh_list()
+            
+    def mark_selected_non_word(self):
+        sel = self.tree_unknown.selection()
+        if not sel: return
+        
+        item = sel[0]
+        lemma = self.tree_unknown.item(item, "tags")[0]
+        
+        # Mark as ignored/non-word
+        self.db.add_ignored_word(lemma, self.lang_code)
         
         # Remove from UI
         self.tree_unknown.delete(item)

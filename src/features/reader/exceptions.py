@@ -122,3 +122,62 @@ class ValidationError(ReaderError):
     - Log validation failure for monitoring
     """
     pass
+
+
+# Immersive Reading Mode Exceptions
+
+class ContentImportError(ReaderError):
+    """
+    Base exception for content import errors.
+    
+    This is the parent class for all content import-related errors
+    in the Immersive Reading Mode feature.
+    """
+    pass
+
+
+class AttestationRequiredError(ContentImportError):
+    """
+    Exception raised when user attestation is required but not provided.
+    
+    This error occurs when a user attempts to import content without
+    confirming they have legal rights to use it.
+    
+    Recovery:
+    - Display legal attestation dialog
+    - Require explicit user confirmation
+    - Provide information about legal content sources
+    """
+    pass
+
+
+class InvalidContentError(ContentImportError):
+    """
+    Exception raised when content is invalid or cannot be processed.
+    
+    This error occurs when:
+    - Content is empty or too short (< 100 characters)
+    - Content encoding cannot be detected
+    - File format is not supported
+    
+    Recovery:
+    - Display descriptive error message to user
+    - Suggest valid content requirements
+    - Offer to try different encoding
+    """
+    pass
+
+
+class FileTooLargeError(ContentImportError):
+    """
+    Exception raised when file exceeds maximum size limit.
+    
+    This error occurs when a user attempts to import a file larger
+    than the 5MB limit.
+    
+    Recovery:
+    - Inform user of size limit
+    - Suggest splitting content into smaller files
+    - Offer to import first 5MB only
+    """
+    pass

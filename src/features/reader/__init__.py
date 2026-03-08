@@ -51,6 +51,7 @@ from .llm_agent import AdventureReaderAgent
 from .validator import VocabularyValidator, validate_vocabulary
 from .recovery import SessionRecovery
 from .reader_cli import ReaderCLI
+from .content_parser import ContentParser
 
 
 __all__ = [
@@ -85,6 +86,7 @@ __all__ = [
     'VocabularyValidator',
     'validate_vocabulary',
     'SessionRecovery',
+    'ContentParser',
     
     # CLI
     'ReaderCLI',

@@ -7,6 +7,7 @@ from src.core.ui_utils import setup_standard_header
 from src.features.dashboard.prompt_editor_ui import PromptEditorDialog
 from src.features.dashboard.dictionary_settings_ui import DictionarySettingsFrame
 from src.core.localization import tr, set_locale
+from src.core.config import config as app_config
 
 # Config dir is now handled largely by the manager but kept for display if needed
 from src.services.dropbox_sync import dropbox_manager, CONFIG_DIR
@@ -332,7 +333,6 @@ class SettingsUI(ttk.Frame):
         self.preload_var.set(self.study_manager.get_preload_on_startup())
         
         # Load Audio Settings
-        from src.core.config import config as app_config
         self.stt_provider_var.set(app_config.stt_provider)
         self.tts_provider_var.set(app_config.tts_provider)
         self.audio_rate_var.set(app_config.audio_sample_rate)
@@ -445,7 +445,6 @@ class SettingsUI(ttk.Frame):
             self.study_manager.set_preload_on_startup(self.preload_var.get())
             
             # Save Audio Settings
-            from src.core.config import config as app_config
             app_config.stt_provider = self.stt_provider_var.get()
             app_config.tts_provider = self.tts_provider_var.get()
             app_config.audio_sample_rate = int(self.audio_rate_var.get())

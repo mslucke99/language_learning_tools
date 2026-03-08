@@ -9,13 +9,25 @@ class KnownWordsView(ttk.Frame):
         self.db = db
         self.lang_code = lang_code
         self.on_change = on_change
+        
+        self.view_mode = tk.StringVar(value="known") # "known" or "ignored"
+        
         self.setup_ui()
         self.refresh_list()
 
     def setup_ui(self):
-        # Header / Stats
-        self.stats_label = ttk.Label(self, text="Loading stats...", font=("Arial", 10))
-        self.stats_label.pack(fill="x", padx=10, pady=5)
+        # Header / Stats / Toggle
+        header_frame = ttk.Frame(self)
+        header_frame.pack(fill="x", padx=10, pady=5)
+        
+        self.stats_label = ttk.Label(header_frame, text="Loading stats...", font=("Arial", 10))
+        self.stats_label.pack(side="left")
+        
+        toggle_frame = ttk.Frame(header_frame)
+        toggle_frame.pack(side="right")
+        
+        ttk.Radiobutton(toggle_frame, text="Known Words", variable=self.view_mode, value="known", command=self.refresh_list).pack(side="left", padx=5)
+        ttk.Radiobutton(toggle_frame, text="non-words", variable=self.view_mode, value="ignored", command=self.refresh_list).pack(side="left", padx=5)
         
         # Toolbar
         toolbar = ttk.Frame(self)
@@ -60,11 +72,19 @@ class KnownWordsView(ttk.Frame):
 
     def refresh_list(self):
         # Update stats
-        count = self.db.get_known_word_count(self.lang_code)
-        self.stats_label.config(text=f"Total Known Words: {count}")
+        known_count = self.db.get_known_word_count(self.lang_code)
+        # We need a way to get ignored count. For now let's just fetch all and count.
+        ignored_words = self.db.get_all_ignored_words(self.lang_code)
+        ignored_count = len(ignored_words)
         
-        # Update list
-        self.all_words = self.db.get_all_known_words(self.lang_code)
+        self.stats_label.config(text=f"Known: {known_count} | non-words: {ignored_count}")
+        
+        # Update list based on mode
+        if self.view_mode.get() == "known":
+            self.all_words = self.db.get_all_known_words(self.lang_code)
+        else:
+            self.all_words = ignored_words
+            
         self._filter_list()
 
     def _filter_list(self, event=None):
@@ -105,7 +125,9 @@ class KnownWordsView(ttk.Frame):
         word_id = self.tree.item(item, "tags")[0]
         lemma = self.tree.item(item, "values")[0]
         
-        if messagebox.askyesno("Confirm", f"Remove '{lemma}' from known words?", parent=self):
+        msg = f"Remove '{lemma}' from known words?" if self.view_mode.get() == "known" else f"Remove '{lemma}' from non-words?"
+        
+        if messagebox.askyesno("Confirm", msg, parent=self):
             self.db.delete_known_word(word_id)
             self.refresh_list()
             if self.on_change: self.on_change()
