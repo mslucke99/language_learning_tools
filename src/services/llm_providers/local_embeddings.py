@@ -9,10 +9,19 @@ class LocalEmbeddingProvider(LLMProvider):
     """
     
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        import os
         self.model_name = model_name
         self._st_model = None
-        self._tfidf_vectorizer = None
         
+        # Check for local model directory to avoid HF Hub requests
+        # We prioritize models/embedding/<model_name>
+        self.local_path = os.path.join("models", "embedding", model_name)
+        if os.path.isdir(self.local_path):
+            print(f"[LocalEmbeddings] Using local model path: {self.local_path}")
+            self.model_to_load = self.local_path
+        else:
+            self.model_to_load = self.model_name
+
     def is_available(self) -> bool:
         """Check if sentence-transformers is installed."""
         import importlib.util
@@ -26,6 +35,11 @@ class LocalEmbeddingProvider(LLMProvider):
 
     def set_model(self, model_name: str) -> bool:
         self.model_name = model_name
+        # Reset model loading path if changed
+        import os
+        self.local_path = os.path.join("models", "embedding", model_name)
+        self.model_to_load = self.local_path if os.path.isdir(self.local_path) else model_name
+        self._st_model = None
         return True
 
     def get_current_model(self) -> Optional[str]:
@@ -39,7 +53,8 @@ class LocalEmbeddingProvider(LLMProvider):
         try:
             from sentence_transformers import SentenceTransformer
             if not self._st_model:
-                self._st_model = SentenceTransformer(self.model_name)
+                # Load from local_path if exists, otherwise model_name (HF Hub)
+                self._st_model = SentenceTransformer(self.model_to_load)
             
             embeddings = self._st_model.encode(texts)
             return embeddings.tolist()

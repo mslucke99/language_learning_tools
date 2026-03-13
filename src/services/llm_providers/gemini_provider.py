@@ -102,36 +102,5 @@ class GeminiProvider(LLMProvider):
         return None
 
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Implementation for Gemini embedding endpoint."""
-        if not self.api_key:
-            return []
-            
-        try:
-            # batchEmbedContents allows multiple strings in one request
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents?key={self.api_key}"
-            
-            requests_list = []
-            for text in texts:
-                requests_list.append({
-                    "model": "models/text-embedding-004",
-                    "content": {"parts": [{"text": text}]}
-                })
-                
-            payload = {"requests": requests_list}
-            
-            response = requests.post(
-                url,
-                headers={"Content-Type": "application/json"},
-                json=payload,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                # Extract embeddings from: data["embeddings"] -> items with "values"
-                return [item["values"] for item in data.get("embeddings", [])]
-            else:
-                print(f"[Gemini] Embedding Error {response.status_code}: {response.text}")
-        except Exception as e:
-            print(f"[Gemini] Embedding Error: {e}")
+        """API embeddings disabled to favor local sentence-transformers."""
         return []

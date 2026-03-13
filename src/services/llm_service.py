@@ -107,7 +107,7 @@ class LLMService:
             return []
             
         embeddings = []
-        if self.provider:
+        if self.provider and self.provider_type.lower() != "gemini":
             try:
                 embeddings = self.provider.generate_embeddings(texts)
             except Exception as e:
