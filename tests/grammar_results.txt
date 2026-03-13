@@ -1,0 +1,15 @@
+--- Testing 'Can' Pattern ---
+Sentence: [할 수 있어요.]
+Tokens: [('하', 'VV', '하다'), ('ᆯ', 'ETM', 'ᆯ'), ('수', 'NNB', '수'), ('있', 'VA', '있다'), ('어요', 'EF', '어요'), ('.', 'SF', '.')]
+Grammar: ['Possibility (-ㄹ 수 있다/없다)']
+
+--- Testing 'Want' Pattern ---
+Sentence: [먹고 싶어요.]
+Tokens: [('먹', 'VV', '먹다'), ('고', 'EC', '고'), ('싶', 'VX', '싶'), ('어요', 'EF', '어요'), ('.', 'SF', '.')]
+Grammar: ['Want (-고 싶다)']
+
+--- Testing 'Because' Pattern ---
+Sentence: [춥기 때문에 안 가요.]
+Tokens: [('춥', 'VA-I', '춥'), ('기', 'ETN', '기'), ('때문', 'NNB', '때문'), ('에', 'JKB', '에'), ('안', 'MAG', '안'), ('가', 'VV', '가다'), ('어요', 'EF', '어요'), ('.', 'SF', '.')]
+Grammar: ['Because (-기 때문에)']
+

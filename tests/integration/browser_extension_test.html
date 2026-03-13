@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Browser Extension - Confirmation Message Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #007AFF;
+            padding-bottom: 10px;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+        .btn-word {
+            background: #007AFF;
+            color: white;
+        }
+        .btn-word:hover {
+            background: #0056CC;
+        }
+        .btn-sentence {
+            background: #34C759;
+            color: white;
+        }
+        .btn-sentence:hover {
+            background: #30B24D;
+        }
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            color: white;
+            z-index: 10001;
+            font-weight: bold;
+            animation: slideIn 0.3s ease-out;
+        }
+        .notification.success {
+            background: #34C759;
+        }
+        .notification.error {
+            background: #FF3B30;
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
+        .log {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        .timestamp {
+            color: #666;
+            font-weight: bold;
+        }
+        .status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 4px;
+            margin: 5px;
+            font-size: 12px;
+        }
+        .status.ok {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .api-status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .api-status.online {
+            background: #d4edda;
+            color: #155724;
+        }
+        .api-status.offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Browser Extension Test</h1>
+    
+    <div class="test-section">
+        <h2>API Status</h2>
+        <div id="api-status" class="api-status offline">
+            ⏳ Checking API...
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test: Add Word (Context Menu Simulation)</h2>
+        <p>Click button to simulate adding a word via browser context menu</p>
+        <button class="btn-word" onclick="testAddWord()">📝 Add Word (Context Menu)</button>
+        <button class="btn-word" onclick="testAddWordMultiple()">📝 Add 3 Words</button>
+        <div class="log" id="log-word"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test: Add Sentence (Context Menu Simulation)</h2>
+        <p>Click button to simulate adding a sentence via browser context menu</p>
+        <button class="btn-sentence" onclick="testAddSentence()">💬 Add Sentence (Context Menu)</button>
+        <button class="btn-sentence" onclick="testAddSentenceMultiple()">💬 Add 3 Sentences</button>
+        <div class="log" id="log-sentence"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Summary</h2>
+        <div id="summary"></div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5000/api';
+        let successCount = 0;
+        let errorCount = 0;
+
+        // Check API status on load
+        window.addEventListener('load', checkApiStatus);
+
+        function checkApiStatus() {
+            fetch(`${API_URL}/health`)
+                .then(r => r.json())
+                .then(data => {
+                    const status = document.getElementById('api-status');
+                    if (data.status === 'ok') {
+                        status.textContent = '✓ API Online (localhost:5000)';
+                        status.className = 'api-status online';
+                    } else {
+                        status.textContent = '✗ API Error';
+                        status.className = 'api-status offline';
+                    }
+                })
+                .catch(err => {
+                    const status = document.getElementById('api-status');
+                    status.textContent = '✗ API Offline - Make sure server is running (.\\manage-server.ps1 server-bg)';
+                    status.className = 'api-status offline';
+                });
+        }
+
+        function showNotification(message, isError = false) {
+            const notification = document.createElement('div');
+            notification.className = `notification ${isError ? 'error' : 'success'}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-in';
+                setTimeout(() => notification.remove(), 300);
+            }, 4000);
+        }
+
+        function addLog(message, logElementId) {
+            const log = document.getElementById(logElementId);
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `<span class="timestamp">[${time}]</span> ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        async function sendImport(type, content, logElementId) {
+            addLog(`📤 Sending ${type}...`, logElementId);
+
+            try {
+                const response = await fetch(`${API_URL}/imported`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content_type: type,
+                        content: content,
+                        url: window.location.href,
+                        title: document.title
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    addLog(`✓ Success! (ID: ${data.content_id})`, logElementId);
+                    showNotification(`✓ Added ${type}: "${content.substring(0, 40)}..."`);
+                    successCount++;
+                } else {
+                    addLog(`✗ Error: ${data.error}`, logElementId);
+                    showNotification(`✗ Failed: ${data.error}`, true);
+                    errorCount++;
+                }
+            } catch (error) {
+                addLog(`✗ Network error: ${error.message}`, logElementId);
+                showNotification(`✗ Failed: ${error.message}`, true);
+                errorCount++;
+            }
+
+            updateSummary();
+        }
+
+        function updateSummary() {
+            const summary = document.getElementById('summary');
+            summary.innerHTML = `
+                <div>
+                    <span class="status ok">✓ Successful: ${successCount}</span>
+                    <span class="status error">✗ Errors: ${errorCount}</span>
+                    <span class="status">Total: ${successCount + errorCount}</span>
+                </div>
+            `;
+        }
+
+        // Test functions
+        function testAddWord() {
+            sendImport('word', 'ephemeral', 'log-word');
+        }
+
+        function testAddWordMultiple() {
+            const words = ['serendipity', 'melancholy', 'eloquent'];
+            words.forEach((word, index) => {
+                setTimeout(() => {
+                    sendImport('word', word, 'log-word');
+                }, index * 500);
+            });
+        }
+
+        function testAddSentence() {
+            sendImport('sentence', 'The quick brown fox jumps over the lazy dog.', 'log-sentence');
+        }
+
+        function testAddSentenceMultiple() {
+            const sentences = [
+                'Learning languages opens doors to new cultures.',
+                'Consistent practice is the key to mastery.',
+                'Every mistake is a step towards progress.'
+            ];
+            sentences.forEach((sentence, index) => {
+                setTimeout(() => {
+                    sendImport('sentence', sentence, 'log-sentence');
+                }, index * 500);
+            });
+        }
+
+        // Update summary on load
+        updateSummary();
+    </script>
+</body>
+</html>
