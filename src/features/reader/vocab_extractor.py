@@ -114,7 +114,7 @@ class VocabExtractor:
         
         # Get lookup details
         cursor.execute("""
-            SELECT word, sentence_context, definition, language
+            SELECT word, sentence_context, definition
             FROM reading_lookups
             WHERE id = ? AND session_id = ?
         """, (lookup_id, session_id))
@@ -127,7 +127,6 @@ class VocabExtractor:
         word = lookup[0]
         sentence_context = lookup[1]
         definition = lookup[2]
-        language = lookup[3] if lookup[3] else 'en'  # Default to English
         
         # Extract minimal context (max 200 chars)
         context = self.get_minimal_context(word, sentence_context)
@@ -138,14 +137,14 @@ class VocabExtractor:
             content=word,
             context=context,
             url=f'reading_mode_session_{session_id}',
-            language=language,
+            language='en',  # Default to English
             title=f'Word from Reading Session'
         )
         
         # Add the word to StudyManager
         word_id = self.study_manager.add_manual_word(
             word=word,
-            language=language,
+            language='en',  # Default to English
             context=context,
             source_url=f'reading_mode_session_{session_id}',
             source_title=f'Word from Reading Session #{session_id}'

@@ -307,6 +307,8 @@ class TemplateEngine:
         # Ensure we have at least 2 choices
         if len(choices) < 2:
             choices.append(Choice(id=99, text="Continue", description="Continue the story"))
+        if len(choices) < 2:
+            choices.append(Choice(id=100, text="Go back", description="Go back to the previous location"))
         
         # Create passage
         passage = StoryPassage(
@@ -453,3 +455,36 @@ class TemplateEngine:
                 del self._template_cache[template.genre]
             
             return cursor.lastrowid
+    
+    def _extract_word_from_question(self, question: str) -> str:
+        """
+        Extract the word from a question format string.
+        
+        Handles various formats:
+        - Plain word: "학교"
+        - With context: "학교 (in sentence: ...)"
+        - With translation: "학교 - school"
+        - With brackets: "학교 [noun]"
+        
+        Args:
+            question: Question string in various formats
+        
+        Returns:
+            The extracted word
+        """
+        # Remove common suffixes
+        word = question.strip()
+        
+        # Remove translation (after dash)
+        if " - " in word:
+            word = word.split(" - ")[0].strip()
+        
+        # Remove context (in parentheses)
+        if " (" in word:
+            word = word.split(" (")[0].strip()
+        
+        # Remove brackets
+        if " [" in word:
+            word = word.split(" [")[0].strip()
+        
+        return word

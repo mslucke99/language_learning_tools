@@ -154,8 +154,7 @@ class StoryGenerator:
             template = templates[0]
         
         # Fill the template with vocabulary
-        known_words_list = list(vocabulary.known_words | vocabulary.session_words)
-        passage = self.template_engine.fill_template(template, known_words_list)
+        passage = self.template_engine.fill_template(template, vocabulary)
         
         return passage
     

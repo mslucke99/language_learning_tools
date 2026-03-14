@@ -211,9 +211,9 @@ class StorySessionManager:
             id=row[0],
             language=row[1],
             genre=row[2],
-            generation_mode=GenerationMode.from_string(row[3]),
+            generation_mode=GenerationMode(row[3]),
             current_passage_id=row[4],
-            story_context=row[5],
+            story_context=StoryContext.from_json(row[5]),
             vocabulary_introduced=vocabulary_introduced,
             created_at=row[7],
             last_updated=row[8]
@@ -371,8 +371,8 @@ class StorySessionManager:
         # Step 1: Load session state
         session = self.load_session(session_id)
         
-        # Step 2: Parse story context
-        context = StoryContext.from_json(session.story_context)
+        # Step 2: Get story context (already a StoryContext object from load_session)
+        context = session.story_context
         
         # Step 3: Update context based on choice
         if choice_id > 0:
