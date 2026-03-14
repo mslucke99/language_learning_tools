@@ -266,6 +266,11 @@ class DashboardApp:
     def show_reading_mode(self):
         from src.features.reader.ui.reading_mode_frame import ReadingModeFrame
         self.show_frame(ReadingModeFrame, study_manager=self.study_manager, db=self.db)
+    
+    def show_adventure_reader(self):
+        """Show adventure graded reader interface."""
+        from src.features.reader.ui.adventure_reader_frame import AdventureReaderFrame
+        self.show_frame(AdventureReaderFrame, study_manager=self.study_manager, db=self.db)
 
     # --- Settings ---
     
@@ -507,12 +512,15 @@ class HomeDashboard(ttk.Frame):
         # Row 2: Advanced Practice
         ttk.Button(grid_frame, text=tr("btn_writing_lab", "✍️ Writing Lab"), command=self.controller.show_writing_lab_view, style="Large.TButton").grid(row=1, column=0, padx=15, pady=15, sticky="nsew")
         ttk.Button(grid_frame, text=tr("btn_chat", "💬 AI Tutor Chat"), command=self.controller.show_chat_dashboard, style="Large.TButton").grid(row=1, column=1, padx=15, pady=15, sticky="nsew")
-        ttk.Button(grid_frame, text=tr("btn_reading_mode", "📖 Reading Mode"), command=self.controller.show_reading_mode, style="Large.TButton").grid(row=1, column=2, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_adventure_reader", "🎮 Story Mode"), command=self.controller.show_adventure_reader, style="Large.TButton").grid(row=1, column=2, padx=15, pady=15, sticky="nsew")
         
         # Row 3: App Settings
-        ttk.Button(grid_frame, text=tr("btn_vocab_map", "🕸️ Knowledge Graph"), command=self.controller.show_knowledge_graph, style="Large.TButton").grid(row=2, column=0, padx=15, pady=15, sticky="nsew")
-        ttk.Button(grid_frame, text=tr("btn_pronunciation_lab", "🎙️ Pronunciation Lab"), command=self.controller.show_pronunciation_lab_view, style="Large.TButton").grid(row=2, column=1, padx=15, pady=15, sticky="nsew")
-        ttk.Button(grid_frame, text=tr("btn_settings", "⚙️ App Settings"), command=self.controller.show_settings, style="Large.TButton").grid(row=2, column=2, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_reading_mode", "📖 Reading Mode"), command=self.controller.show_reading_mode, style="Large.TButton").grid(row=2, column=0, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_vocab_map", "🕸️ Knowledge Graph"), command=self.controller.show_knowledge_graph, style="Large.TButton").grid(row=2, column=1, padx=15, pady=15, sticky="nsew")
+        ttk.Button(grid_frame, text=tr("btn_pronunciation_lab", "🎙️ Pronunciation Lab"), command=self.controller.show_pronunciation_lab_view, style="Large.TButton").grid(row=2, column=2, padx=15, pady=15, sticky="nsew")
+        
+        # Row 4: Settings
+        ttk.Button(grid_frame, text=tr("btn_settings", "⚙️ App Settings"), command=self.controller.show_settings, style="Large.TButton").grid(row=3, column=0, columnspan=3, padx=15, pady=15, sticky="nsew")
         
         # Configure grid expansion
         for i in range(3):

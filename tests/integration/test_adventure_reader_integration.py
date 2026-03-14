@@ -344,24 +344,24 @@ class TestAdventureReaderIntegration:
         cursor_mock = Mock()
         mock_database.conn.cursor.return_value = cursor_mock
         
-        # Mock passage history
+        # Mock passage history with 2 choices per passage (required by model)
         cursor_mock.fetchall.return_value = [
             (
                 1, 1, 1, "First passage with word1",
                 json.dumps([{"word": "word1", "translation": "trans1", "context_sentence": "word1 context"}]),
-                json.dumps([{"id": 1, "text": "Choice 1", "description": ""}]),
+                json.dumps([{"id": 1, "text": "Choice 1", "description": ""}, {"id": 2, "text": "Choice 2", "description": ""}]),
                 "2024-01-01T00:00:00"
             ),
             (
                 2, 1, 2, "Second passage with word2",
                 json.dumps([{"word": "word2", "translation": "trans2", "context_sentence": "word2 context"}]),
-                json.dumps([{"id": 1, "text": "Choice 1", "description": ""}]),
+                json.dumps([{"id": 1, "text": "Choice 1", "description": ""}, {"id": 2, "text": "Choice 2", "description": ""}]),
                 "2024-01-01T01:00:00"
             ),
             (
                 3, 1, 3, "Third passage with word3",
                 json.dumps([{"word": "word3", "translation": "trans3", "context_sentence": "word3 context"}]),
-                json.dumps([{"id": 1, "text": "Choice 1", "description": ""}]),
+                json.dumps([{"id": 1, "text": "Choice 1", "description": ""}, {"id": 2, "text": "Choice 2", "description": ""}]),
                 "2024-01-01T02:00:00"
             )
         ]
