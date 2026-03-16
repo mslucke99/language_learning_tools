@@ -270,7 +270,7 @@ class DashboardApp:
     def show_adventure_reader(self):
         """Show adventure graded reader interface."""
         from src.features.reader.ui.adventure_reader_frame import AdventureReaderFrame
-        self.show_frame(AdventureReaderFrame, study_manager=self.study_manager, db=self.db)
+        self.show_frame(AdventureReaderFrame, study_manager=self.study_manager, db=self.db, llm_service=self.ai_client)
 
     # --- Settings ---
     

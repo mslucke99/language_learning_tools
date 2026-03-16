@@ -413,6 +413,14 @@ class StudyManager:
                         context_text=kwargs.get('context_text')
                     )
                     suggestions = {}
+                elif task_type == 'analyze_sentence_difficulty':
+                    success, result, suggestions = self._handle_sentence_analysis(task)
+                elif task_type == 'batch_analyze_sentences':
+                    success, result, suggestions = self._handle_batch_analysis(task)
+                elif task_type == 'cluster_sentence':
+                    success, result, suggestions = self._handle_sentence_clustering(task)
+                elif task_type == 'batch_cluster_sentences':
+                    success, result, suggestions = self._handle_batch_clustering(task)
                 else:
                     success, result, suggestions = False, "Unknown task type", {}
                 
@@ -1961,3 +1969,151 @@ Any important exceptions or nuances.
             dialogue += f"**{name}** ({role}): {content}\n"
         
         return dialogue if dialogue else ""
+
+    # ========== SENTENCE MINING TASK HANDLERS ==========
+    
+    def _handle_sentence_analysis(self, task: Dict) -> Tuple[bool, str, Dict]:
+        """
+        Handle single sentence difficulty analysis task.
+        
+        Args:
+            task: Task dictionary with item_id and kwargs
+            
+        Returns:
+            Tuple of (success, result_message, suggestions)
+        """
+        try:
+            from src.features.mining.logic.sentence_analyzer import SentenceAnalyzer
+            
+            sentence_id = task['item_id']
+            analyzer = SentenceAnalyzer(self.db, self.ai_client)
+            
+            result = analyzer.analyze_sentence(sentence_id)
+            
+            return True, f"Analyzed sentence {sentence_id}: difficulty={result.difficulty_score:.2f}", {
+                'difficulty_score': result.difficulty_score,
+                'grammar_complexity': result.grammar_complexity,
+                'unknown_words': result.unknown_words
+            }
+        except Exception as e:
+            return False, f"Failed to analyze sentence: {str(e)}", {}
+    
+    def _handle_batch_analysis(self, task: Dict) -> Tuple[bool, str, Dict]:
+        """
+        Handle batch sentence difficulty analysis task.
+        
+        Args:
+            task: Task dictionary with kwargs containing sentence_ids
+            
+        Returns:
+            Tuple of (success, result_message, suggestions)
+        """
+        try:
+            from src.features.mining.logic.sentence_analyzer import SentenceAnalyzer
+            
+            sentence_ids = task['kwargs'].get('sentence_ids', [])
+            analyzer = SentenceAnalyzer(self.db, self.ai_client)
+            
+            success_count = analyzer.batch_analyze(sentence_ids)
+            
+            return True, f"Batch analyzed {success_count}/{len(sentence_ids)} sentences", {
+                'analyzed_count': success_count,
+                'total_count': len(sentence_ids)
+            }
+        except Exception as e:
+            return False, f"Failed to batch analyze sentences: {str(e)}", {}
+    
+    def _handle_sentence_clustering(self, task: Dict) -> Tuple[bool, str, Dict]:
+        """
+        Handle sentence clustering (pattern and topic detection) task.
+        
+        Args:
+            task: Task dictionary with item_id
+            
+        Returns:
+            Tuple of (success, result_message, suggestions)
+        """
+        try:
+            from src.features.mining.logic.sentence_clusterer import SentenceClusterer
+            
+            sentence_id = task['item_id']
+            clusterer = SentenceClusterer(self.db, self.ai_client)
+            
+            clusterer.auto_cluster_sentence(sentence_id)
+            
+            return True, f"Clustered sentence {sentence_id}", {}
+        except Exception as e:
+            return False, f"Failed to cluster sentence: {str(e)}", {}
+    
+    def _handle_batch_clustering(self, task: Dict) -> Tuple[bool, str, Dict]:
+        """
+        Handle batch sentence clustering task.
+        
+        Args:
+            task: Task dictionary with kwargs containing sentence_ids
+            
+        Returns:
+            Tuple of (success, result_message, suggestions)
+        """
+        try:
+            from src.features.mining.logic.sentence_clusterer import SentenceClusterer
+            
+            sentence_ids = task['kwargs'].get('sentence_ids', [])
+            clusterer = SentenceClusterer(self.db, self.ai_client)
+            
+            success_count = clusterer.batch_cluster(sentence_ids)
+            
+            return True, f"Batch clustered {success_count}/{len(sentence_ids)} sentences", {
+                'clustered_count': success_count,
+                'total_count': len(sentence_ids)
+            }
+        except Exception as e:
+            return False, f"Failed to batch cluster sentences: {str(e)}", {}
+    
+    def queue_difficulty_analysis(self, sentence_id: int) -> str:
+        """
+        Queue a single sentence for difficulty analysis.
+        
+        Args:
+            sentence_id: ID of sentence to analyze
+            
+        Returns:
+            Task ID
+        """
+        return self.queue_generation_task('analyze_sentence_difficulty', sentence_id)
+    
+    def queue_batch_analysis(self, sentence_ids: List[int]) -> str:
+        """
+        Queue multiple sentences for batch difficulty analysis.
+        
+        Args:
+            sentence_ids: List of sentence IDs to analyze
+            
+        Returns:
+            Task ID
+        """
+        return self.queue_generation_task('batch_analyze_sentences', 0, sentence_ids=sentence_ids)
+    
+    def queue_sentence_clustering(self, sentence_id: int) -> str:
+        """
+        Queue a single sentence for clustering (pattern and topic detection).
+        
+        Args:
+            sentence_id: ID of sentence to cluster
+            
+        Returns:
+            Task ID
+        """
+        return self.queue_generation_task('cluster_sentence', sentence_id)
+    
+    def queue_batch_clustering(self, sentence_ids: List[int]) -> str:
+        """
+        Queue multiple sentences for batch clustering.
+        
+        Args:
+            sentence_ids: List of sentence IDs to cluster
+            
+        Returns:
+            Task ID
+        """
+        return self.queue_generation_task('batch_cluster_sentences', 0, sentence_ids=sentence_ids)

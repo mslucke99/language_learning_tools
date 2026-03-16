@@ -62,11 +62,11 @@ class StoryGenerator:
         # Initialize template engine (always available for fallback)
         self.template_engine = TemplateEngine(database)
         
-        # Initialize LLM agent if in LLM mode
-        if mode == GenerationMode.LLM:
-            if llm_service is None:
-                raise ValueError("llm_service is required for LLM generation mode")
+        # Initialize LLM agent if service is provided
+        if llm_service is not None:
             self.llm_agent = AdventureReaderAgent(llm_service)
+        elif mode == GenerationMode.LLM:
+            raise ValueError("llm_service is required for LLM generation mode")
         else:
             self.llm_agent = None
         

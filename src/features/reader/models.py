@@ -15,6 +15,14 @@ class GenerationMode(Enum):
     """Story generation mode."""
     TEMPLATE = "template"
     LLM = "llm"
+    
+    @classmethod
+    def from_string(cls, value: str) -> "GenerationMode":
+        """Create from string value."""
+        try:
+            return cls(value.lower().strip())
+        except ValueError:
+            return cls.TEMPLATE  # Default to template on invalid value
 
 
 @dataclass

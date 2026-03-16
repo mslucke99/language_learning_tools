@@ -774,6 +774,80 @@ class FlashcardDatabase:
             END
         """)
 
+        # 19. Sentence Mining: Add difficulty tracking columns to imported_content
+        cursor.execute("PRAGMA table_info(imported_content)")
+        columns = [info[1] for info in cursor.fetchall()]
+        
+        mining_columns = {
+            'difficulty_score': 'REAL',
+            'known_word_ratio': 'REAL',
+            'grammar_complexity': 'TEXT',
+            'unknown_words': 'TEXT',
+            'detected_patterns': 'TEXT',
+            'detected_topics': 'TEXT',
+            'analysis_timestamp': 'TEXT'
+        }
+        
+        for col_name, col_type in mining_columns.items():
+            if col_name not in columns:
+                print(f"[DB] Migrating imported_content: adding {col_name}")
+                cursor.execute(f"ALTER TABLE imported_content ADD COLUMN {col_name} {col_type}")
+        
+        # Create indexes for performance
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_imported_content_difficulty ON imported_content(difficulty_score)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_imported_content_grammar ON imported_content(grammar_complexity)")
+
+        # 20. Sentence Mining: Create sentence_study_progress table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sentence_study_progress (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                imported_content_id INTEGER NOT NULL,
+                last_reviewed TEXT NOT NULL,
+                review_count INTEGER DEFAULT 0,
+                correct_count INTEGER DEFAULT 0,
+                ease_factor REAL DEFAULT 2.5,
+                interval_days INTEGER DEFAULT 1,
+                next_review_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (imported_content_id) REFERENCES imported_content (id) ON DELETE CASCADE,
+                UNIQUE(imported_content_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sentence_study_next_review ON sentence_study_progress(next_review_date)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sentence_study_content_id ON sentence_study_progress(imported_content_id)")
+
+        # 21. Sentence Mining: Create sentence_collections table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sentence_collections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                collection_type TEXT NOT NULL,
+                language TEXT NOT NULL,
+                metadata TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sentence_collections_type ON sentence_collections(collection_type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sentence_collections_language ON sentence_collections(language)")
+
+        # 22. Sentence Mining: Create sentence_collection_items table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sentence_collection_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id INTEGER NOT NULL,
+                imported_content_id INTEGER NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                added_at TEXT NOT NULL,
+                FOREIGN KEY (collection_id) REFERENCES sentence_collections (id) ON DELETE CASCADE,
+                FOREIGN KEY (imported_content_id) REFERENCES imported_content (id) ON DELETE CASCADE,
+                UNIQUE(collection_id, imported_content_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sentence_collection_items_collection ON sentence_collection_items(collection_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sentence_collection_items_content ON sentence_collection_items(imported_content_id)")
+
         self.conn.commit()
 
     def log_review(self, flashcard_id: int, grade: int, time_taken: int = 0, review_desc: str = 'flashcard'):

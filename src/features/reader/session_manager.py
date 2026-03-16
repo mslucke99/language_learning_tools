@@ -420,6 +420,8 @@ class StorySessionManager:
         
         # Step 5: Generate new passage
         try:
+            # Sync generator mode with session mode
+            self.story_generator.mode = session.generation_mode
             passage = self.story_generator.generate_passage(context, constraints)
         except Exception as e:
             logger.error(f"Failed to generate passage: {e}")
