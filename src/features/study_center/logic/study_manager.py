@@ -15,7 +15,7 @@ import threading
 import queue
 import time
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, date
 from typing import Optional, List, Dict, Tuple
 from src.core.database import FlashcardDatabase
 from src.services.llm_service import OllamaClient, OllamaThreadedQuery
@@ -626,7 +626,8 @@ class StudyManager:
         cursor = self.db.conn.cursor()
         cursor.execute("""
             SELECT ic.id, ic.content, ic.url, ic.title, ic.created_at, ic.language,
-                   COUNT(se.id) as has_explanation, ic.collection_id
+                   COUNT(se.id) as has_explanation, ic.collection_id,
+                   ic.difficulty_score, ic.known_word_ratio, ic.grammar_complexity
             FROM imported_content ic
             LEFT JOIN sentence_explanations se ON ic.id = se.imported_content_id
             WHERE ic.content_type = 'sentence'
@@ -644,9 +645,227 @@ class StudyManager:
                 'created_at': row[4],
                 'language': row[5] or self.study_language,
                 'has_explanation': row[6] > 0,
-                'collection_id': row[7]
+                'collection_id': row[7],
+                'difficulty_score': row[8],
+                'known_word_ratio': row[9],
+                'grammar_complexity': row[10]
             })
         return sentences
+    
+    # ========== SENTENCE MINING METHODS ==========
+    
+    def get_due_sentences(self, language: str = None, limit: int = 50) -> List[Dict]:
+        """Get sentences due for review today."""
+        cursor = self.db.conn.cursor()
+        query = """
+            SELECT ic.id, ic.content, ic.difficulty_score, ic.known_word_ratio, ic.grammar_complexity,
+                   ssp.next_review_date, ssp.last_reviewed, ssp.review_count, ssp.correct_count,
+                   ssp.ease_factor, ssp.interval_days
+            FROM imported_content ic
+            JOIN sentence_study_progress ssp ON ic.id = ssp.imported_content_id
+            WHERE ic.content_type = 'sentence'
+            AND (ssp.next_review_date IS NULL OR ssp.next_review_date <= datetime('now'))
+        """
+        params = []
+        if language:
+            query += " AND ic.language = ?"
+            params.append(language)
+        query += " ORDER BY ssp.next_review_date ASC LIMIT ?"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        sentences = []
+        now = datetime.now()
+        for row in cursor.fetchall():
+            next_review = row[5]
+            days_overdue = 0
+            if next_review:
+                try:
+                    next_date = datetime.fromisoformat(next_review.replace('Z', '+00:00'))
+                    days_overdue = (now - next_date).days
+                except:
+                    pass
+            
+            sentences.append({
+                'id': row[0],
+                'sentence': row[1],
+                'difficulty_score': row[2],
+                'known_word_ratio': row[3],
+                'grammar_complexity': row[4],
+                'next_review_date': row[5],
+                'last_reviewed': row[6],
+                'review_count': row[7] or 0,
+                'correct_count': row[8] or 0,
+                'ease_factor': row[9] or 2.5,
+                'interval_days': row[10] or 1,
+                'days_overdue': days_overdue
+            })
+        return sentences
+    
+    def record_sentence_review(self, sentence_id: int, correct: bool) -> Dict:
+        """Record a sentence review and update spaced repetition schedule."""
+        cursor = self.db.conn.cursor()
+        
+        # Get current progress
+        cursor.execute("""
+            SELECT ease_factor, interval_days, review_count, correct_count
+            FROM sentence_study_progress
+            WHERE imported_content_id = ?
+        """, (sentence_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            # Create new record
+            ease_factor = 2.5
+            interval_days = 1
+            review_count = 1
+            correct_count = 1 if correct else 0
+        else:
+            ease_factor, interval_days, review_count, correct_count = row
+            if correct:
+                # SM-2: increase ease factor
+                ease_factor = max(1.3, ease_factor + 0.1)
+                interval_days = int(interval_days * ease_factor)
+                correct_count += 1
+            else:
+                # SM-2: decrease ease factor and reset
+                ease_factor = max(1.3, ease_factor - 0.2)
+                interval_days = 1
+            review_count += 1
+        
+        next_review = (datetime.now() + timedelta(days=interval_days)).isoformat()
+        now = datetime.now().isoformat()
+        
+        # Upsert the record
+        cursor.execute("""
+            INSERT INTO sentence_study_progress 
+            (imported_content_id, last_reviewed, next_review_date, ease_factor, interval_days, review_count, correct_count, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM sentence_study_progress WHERE imported_content_id = ?), ?))
+            ON CONFLICT(imported_content_id) DO UPDATE SET
+                last_reviewed = excluded.last_reviewed,
+                next_review_date = excluded.next_review_date,
+                ease_factor = excluded.ease_factor,
+                interval_days = excluded.interval_days,
+                review_count = excluded.review_count,
+                correct_count = excluded.correct_count
+        """, (sentence_id, now, next_review, ease_factor, interval_days, review_count, correct_count, sentence_id, now))
+        
+        self.db.conn.commit()
+        
+        return {
+            'sentence_id': sentence_id,
+            'correct': correct,
+            'ease_factor': ease_factor,
+            'interval_days': interval_days,
+            'next_review_date': next_review,
+            'review_count': review_count,
+            'correct_count': correct_count
+        }
+    
+    def get_review_statistics(self) -> Dict:
+        """Get review statistics for the dashboard."""
+        cursor = self.db.conn.cursor()
+        
+        # Total studied
+        cursor.execute("SELECT COUNT(*) FROM sentence_study_progress")
+        total_studied = cursor.fetchone()[0] or 0
+        
+        # Due today
+        cursor.execute("""
+            SELECT COUNT(*) FROM sentence_study_progress ssp
+            JOIN imported_content ic ON ssp.imported_content_id = ic.id
+            WHERE ic.content_type = 'sentence'
+            AND (ssp.next_review_date IS NULL OR ssp.next_review_date <= datetime('now'))
+        """)
+        due_today = cursor.fetchone()[0] or 0
+        
+        # Overdue
+        cursor.execute("""
+            SELECT COUNT(*) FROM sentence_study_progress ssp
+            JOIN imported_content ic ON ssp.imported_content_id = ic.id
+            WHERE ic.content_type = 'sentence'
+            AND ssp.next_review_date < datetime('now')
+        """)
+        overdue = cursor.fetchone()[0] or 0
+        
+        # Average accuracy
+        cursor.execute("SELECT AVG(CAST(correct_count AS FLOAT) / NULLIF(review_count, 0)) * 100 FROM sentence_study_progress WHERE review_count > 0")
+        avg_accuracy = cursor.fetchone()[0] or 0
+        
+        # Average ease factor
+        cursor.execute("SELECT AVG(ease_factor) FROM sentence_study_progress")
+        avg_ease = cursor.fetchone()[0] or 2.5
+        
+        # Study streak (simplified)
+        cursor.execute("""
+            SELECT DISTINCT date(last_reviewed) as review_date
+            FROM sentence_study_progress
+            WHERE last_reviewed IS NOT NULL
+            ORDER BY review_date DESC
+        """)
+        dates = [row[0] for row in cursor.fetchall() if row[0]]
+        streak = 0
+        if dates:
+            today = date.today().isoformat()
+            if today in dates:
+                streak = 1
+                check_date = date.today()
+                while True:
+                    check_date = check_date - timedelta(days=1)
+                    if check_date.isoformat() in dates:
+                        streak += 1
+                    else:
+                        break
+        
+        return {
+            'total_studied': total_studied,
+            'due_today': due_today,
+            'overdue': overdue,
+            'average_accuracy': avg_accuracy,
+            'current_streak': streak,
+            'average_ease_factor': avg_ease
+        }
+    
+    def get_sentence_recommendations(self, limit: int = 5) -> List[Dict]:
+        """Get recommended sentences at i+1 level."""
+        # Calculate user level from recent study
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            SELECT AVG(ic.difficulty_score)
+            FROM sentence_study_progress ssp
+            JOIN imported_content ic ON ssp.imported_content_id = ic.id
+            WHERE ic.content_type = 'sentence'
+            AND ssp.last_reviewed >= datetime('now', '-30 days')
+        """)
+        row = cursor.fetchone()
+        user_level = row[0] if row and row[0] is not None else 0.3
+        
+        # Find sentences at i+1 level (0.1-0.2 above user level)
+        target_min = user_level + 0.1
+        target_max = user_level + 0.2
+        
+        cursor.execute("""
+            SELECT ic.id, ic.content, ic.difficulty_score, ic.known_word_ratio, ic.grammar_complexity
+            FROM imported_content ic
+            WHERE ic.content_type = 'sentence'
+            AND ic.difficulty_score IS NOT NULL
+            AND ic.difficulty_score >= ? AND ic.difficulty_score <= ?
+            AND ic.id NOT IN (SELECT imported_content_id FROM sentence_study_progress WHERE last_reviewed >= datetime('now', '-7 days'))
+            ORDER BY ic.difficulty_score ASC
+            LIMIT ?
+        """, (target_min, target_max, limit))
+        
+        recommendations = []
+        for row in cursor.fetchall():
+            recommendations.append({
+                'id': row[0],
+                'sentence': row[1],
+                'difficulty_score': row[2],
+                'known_word_ratio': row[3],
+                'grammar_complexity': row[4],
+                'reason': f"Level {row[2]:.2f} (i+1 from your level)"
+            })
+        return recommendations
     
     # ========== WORD DEFINITIONS ==========
     

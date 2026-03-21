@@ -24,6 +24,10 @@ class SentencesViewFrame(ttk.Frame):
         self.active_tasks = {}
         self.focus_vars = {}
         
+        # Difficulty filtering and sorting
+        self.difficulty_filter_var = tk.StringVar(value="All")
+        self.sort_var = tk.StringVar(value="Date Added")
+        
         self.setup_ui()
         self._check_queue_status()
 
@@ -69,6 +73,29 @@ class SentencesViewFrame(ttk.Frame):
         status_filter.pack(side="left", padx=5)
         status_filter.bind("<<ComboboxSelected>>", lambda e: self._update_sentences_view())
         
+        # Difficulty filter
+        diff_frame = ttk.Frame(ctrl_frame)
+        diff_frame.pack(fill="x", pady=(5, 0))
+        ttk.Label(diff_frame, text="Difficulty:").pack(side="left")
+        diff_filter = ttk.Combobox(diff_frame, textvariable=self.difficulty_filter_var,
+                                   values=["All", "Easy", "Medium", "Hard", "Unanalyzed"],
+                                   state="readonly", width=10)
+        diff_filter.pack(side="left", padx=5)
+        diff_filter.bind("<<ComboboxSelected>>", lambda e: self._update_sentences_view())
+        
+        # Sort options
+        ttk.Label(diff_frame, text="Sort:").pack(side="left", padx=(10, 0))
+        sort_combo = ttk.Combobox(diff_frame, textvariable=self.sort_var,
+                                  values=["Date Added", "Difficulty (Low to High)", "Difficulty (High to Low)"],
+                                  state="readonly", width=16)
+        sort_combo.pack(side="left", padx=5)
+        sort_combo.bind("<<ComboboxSelected>>", lambda e: self._update_sentences_view())
+        
+        # Analyze All button
+        analyze_btn = ttk.Button(left_pane, text="📊 Analyze All Unscored", 
+                                 command=self._analyze_all_unscored)
+        analyze_btn.pack(fill="x", pady=5)
+        
         tree_frame = ttk.Frame(left_pane)
         tree_frame.pack(fill="both", expand=True)
         list_scroll = ttk.Scrollbar(tree_frame)
@@ -100,6 +127,14 @@ class SentencesViewFrame(ttk.Frame):
         ttk.Button(sentence_btn_frame, text="💾 Save Sentence", command=self._save_sentence_text).pack(side="left", padx=2)
         ttk.Button(sentence_btn_frame, text="⟲ Reset", command=self._reset_sentence_text).pack(side="left", padx=2)
         ttk.Button(sentence_btn_frame, text="💬 Use for Chat", command=self._use_sentence_for_chat).pack(side="left", padx=2)
+        
+        # Difficulty info frame
+        diff_info_frame = ttk.Frame(target_frame)
+        diff_info_frame.pack(fill="x", pady=(5, 0))
+        self.difficulty_label = ttk.Label(diff_info_frame, text="", font=("Arial", 9))
+        self.difficulty_label.pack(side="left")
+        ttk.Button(diff_info_frame, text="📊 Analyze Difficulty", 
+                  command=self._analyze_current_sentence).pack(side="right", padx=2)
 
         
         self.notebook = ttk.Notebook(right_pane)
@@ -174,6 +209,17 @@ class SentencesViewFrame(ttk.Frame):
         if hasattr(self.controller, 'show_study_dashboard'):
             self.controller.show_study_dashboard()
 
+    def _classify_difficulty(self, score):
+        """Classify difficulty score into easy/medium/hard."""
+        if score is None:
+            return "unanalyzed"
+        if score <= 0.33:
+            return "easy"
+        elif score <= 0.66:
+            return "medium"
+        else:
+            return "hard"
+    
     def _update_sentences_view(self):
         # Preservation
         scroll_pos = self.sentences_tree.yview()
@@ -181,6 +227,8 @@ class SentencesViewFrame(ttk.Frame):
 
         search_query = self.sent_search_var.get().lower().strip()
         status_filter = self.sent_status_var.get()
+        diff_filter = self.difficulty_filter_var.get()
+        sort_option = self.sort_var.get()
         
         for item in self.sentences_tree.get_children():
             self.sentences_tree.delete(item)
@@ -188,13 +236,31 @@ class SentencesViewFrame(ttk.Frame):
         colls = self.db.get_collections('sentence')
         sentences = self.sentences_data
         
+        # Apply all filters
         filtered_sents = []
         for s in sentences:
             match = True
             if search_query and search_query not in s['sentence'].lower(): match = False
             if status_filter == "Processed" and not s['has_explanation']: match = False
             if status_filter == "Unprocessed" and s['has_explanation']: match = False
+            
+            # Difficulty filter
+            if diff_filter != "All":
+                diff_score = s.get('difficulty_score')
+                diff_class = self._classify_difficulty(diff_score)
+                if diff_filter == "Unanalyzed":
+                    if diff_class != "unanalyzed": match = False
+                elif diff_filter.capitalize() != diff_class.capitalize():
+                    match = False
+            
             if match: filtered_sents.append(s)
+        
+        # Apply sorting
+        if sort_option == "Difficulty (Low to High)":
+            filtered_sents.sort(key=lambda x: x.get('difficulty_score') or 0.5)
+        elif sort_option == "Difficulty (High to Low)":
+            filtered_sents.sort(key=lambda x: x.get('difficulty_score') or 0.5, reverse=True)
+        # Default: Date Added - already sorted by created_at desc
             
         folder_nodes = {}
         remaining = list(colls)
@@ -220,7 +286,15 @@ class SentencesViewFrame(ttk.Frame):
             else:
                 if not uncategorized_node: uncategorized_node = self.sentences_tree.insert("", "end", text="📦 Uncategorized", open=True)
                 parent = uncategorized_node
+            
+            # Build status with difficulty badge
             status = "✓" if s['has_explanation'] else "○"
+            diff_score = s.get('difficulty_score')
+            if diff_score is not None:
+                diff_class = self._classify_difficulty(diff_score)
+                diff_emoji = {"easy": "🟢", "medium": "🟡", "hard": "🔴"}.get(diff_class, "⚪")
+                status = f"{status} {diff_emoji}"
+            
             snippet = s['sentence'][:30] + ("..." if len(s['sentence']) > 30 else "")
             self.sentences_tree.insert(parent, "end", iid=f"sent_{s['id']}", text=f"{status} {snippet}")
 
@@ -248,6 +322,20 @@ class SentencesViewFrame(ttk.Frame):
         self.sentence_display_text.delete(1.0, tk.END)
         self.sentence_display_text.insert(tk.END, sent_data['sentence'])
         self.original_sentence_text = sent_data['sentence']  # Store original for reset
+        
+        # Display difficulty info
+        diff_score = sent_data.get('difficulty_score')
+        if diff_score is not None:
+            diff_class = self._classify_difficulty(diff_score)
+            diff_color = {"easy": "green", "medium": "orange", "hard": "red"}.get(diff_class, "black")
+            known_ratio = sent_data.get('known_word_ratio')
+            ratio_str = f", {known_ratio:.0%} known words" if known_ratio is not None else ""
+            self.difficulty_label.config(
+                text=f"Difficulty: {diff_class.capitalize()} ({diff_score:.2f}){ratio_str}",
+                foreground=diff_color
+            )
+        else:
+            self.difficulty_label.config(text="Difficulty: Not analyzed", foreground="gray")
         
         explanation = self.study_manager.get_sentence_explanation(self.current_sentence_id)
         
@@ -496,6 +584,40 @@ class SentencesViewFrame(ttk.Frame):
     def _refresh_data_manual(self):
         self.sentences_data = self.study_manager.get_imported_sentences()
         self._update_sentences_view()
+    
+    def _analyze_all_unscored(self):
+        """Analyze all sentences that don't have difficulty scores."""
+        unscored = [s for s in self.sentences_data if s.get('difficulty_score') is None]
+        
+        if not unscored:
+            messagebox.showinfo("Info", "All sentences already have difficulty scores!")
+            return
+        
+        if not messagebox.askyesno("Analyze Sentences", 
+                                   f"Analyze difficulty for {len(unscored)} sentences?\n\nThis will run in the background."):
+            return
+        
+        sentence_ids = [s['id'] for s in unscored]
+        task_id = self.study_manager.queue_batch_analysis(sentence_ids)
+        
+        messagebox.showinfo("Analysis Started", 
+                           f"Queued {len(sentence_ids)} sentences for analysis.\n\nTask ID: {task_id}\n\nThe analysis will run in the background. Refresh periodically to see progress.")
+    
+    def _analyze_current_sentence(self):
+        """Analyze the currently selected sentence for difficulty."""
+        if not self.current_sentence_id:
+            messagebox.showwarning("Warning", "Please select a sentence first")
+            return
+        
+        task_id = self.study_manager.queue_difficulty_analysis(self.current_sentence_id)
+        
+        self.active_tasks[task_id] = {
+            'type': 'sentence_analysis',
+            'item_id': self.current_sentence_id
+        }
+        
+        messagebox.showinfo("Analysis Started", 
+                           f"Queued sentence for difficulty analysis.\n\nTask ID: {task_id}")
 
     def _use_sentence_for_chat(self):
         if not self.current_sentence_id or not self.original_sentence_text:

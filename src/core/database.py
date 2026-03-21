@@ -890,6 +890,100 @@ class FlashcardDatabase:
         cursor.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
         self.conn.commit()
 
+    # Sentence Collection methods
+    def get_sentence_collections(self, collection_type: str = None, language: str = None) -> list[dict]:
+        """Get all sentence collections, optionally filtered by type and language."""
+        cursor = self.conn.cursor()
+        query = "SELECT id, name, description, collection_type, language, metadata, created_at, updated_at FROM sentence_collections WHERE 1=1"
+        params = []
+        if collection_type:
+            query += " AND collection_type = ?"
+            params.append(collection_type)
+        if language:
+            query += " AND language = ?"
+            params.append(language)
+        query += " ORDER BY name"
+        cursor.execute(query, params)
+        collections = []
+        for row in cursor.fetchall():
+            import json
+            metadata = row[5]
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except:
+                    metadata = {}
+            collections.append({
+                "id": row[0], "name": row[1], "description": row[2],
+                "collection_type": row[3], "language": row[4],
+                "metadata": metadata, "created_at": row[6], "updated_at": row[7]
+            })
+        return collections
+
+    def create_sentence_collection(self, name: str, description: str, collection_type: str, language: str, metadata: dict) -> int:
+        """Create a new sentence collection and return its ID."""
+        cursor = self.conn.cursor()
+        import json
+        metadata_json = json.dumps(metadata)
+        now = datetime.now().isoformat()
+        cursor.execute(
+            "INSERT INTO sentence_collections (name, description, collection_type, language, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, description, collection_type, language, metadata_json, now, now)
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def delete_sentence_collection(self, collection_id: int):
+        """Delete a sentence collection and its items (cascade)."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM sentence_collections WHERE id = ?", (collection_id,))
+        self.conn.commit()
+
+    def get_collection_sentence_count(self, collection_id: int) -> int:
+        """Get the number of sentences in a collection."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM sentence_collection_items WHERE collection_id = ?", (collection_id,))
+        return cursor.fetchone()[0] or 0
+
+    def add_sentence_to_collection(self, collection_id: int, imported_content_id: int, sort_order: int = 0) -> bool:
+        """Add a sentence to a collection."""
+        cursor = self.conn.cursor()
+        try:
+            now = datetime.now().isoformat()
+            cursor.execute(
+                "INSERT INTO sentence_collection_items (collection_id, imported_content_id, sort_order, added_at) VALUES (?, ?, ?, ?)",
+                (collection_id, imported_content_id, sort_order, now)
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def remove_sentence_from_collection(self, collection_id: int, imported_content_id: int):
+        """Remove a sentence from a collection."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM sentence_collection_items WHERE collection_id = ? AND imported_content_id = ?",
+                      (collection_id, imported_content_id))
+        self.conn.commit()
+
+    def get_collection_sentences(self, collection_id: int) -> list[dict]:
+        """Get all sentences in a collection."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT ic.id, ic.sentence, ic.difficulty_score, ic.known_word_ratio, ic.grammar_complexity
+            FROM sentence_collection_items sci
+            JOIN imported_content ic ON sci.imported_content_id = ic.id
+            WHERE sci.collection_id = ?
+            ORDER BY sci.sort_order, ic.id
+        """, (collection_id,))
+        sentences = []
+        for row in cursor.fetchall():
+            sentences.append({
+                "id": row[0], "sentence": row[1], "difficulty_score": row[2],
+                "known_word_ratio": row[3], "grammar_complexity": row[4]
+            })
+        return sentences
+
     def assign_to_collection(self, item_type: str, item_id: int, collection_id: int):
         """Assign an item (deck, word, sentence, grammar) to a collection."""
         cursor = self.conn.cursor()
