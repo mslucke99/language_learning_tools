@@ -28,10 +28,11 @@ from src.services.text.semantic_familiarity import SemanticFamiliarityScorer
 from src.services.llm_service import get_ai_client
 
 class SentenceMiningView(ttk.Frame):
-    def __init__(self, parent, db: FlashcardDatabase, study_manager: StudyManager = None):
+    def __init__(self, parent, db: FlashcardDatabase, study_manager: StudyManager = None, embedded=False):
         super().__init__(parent)
         self.db = db
         self.study_manager = study_manager
+        self.embedded = embedded
         
         # Get language from StudyManager if available, otherwise default
         if self.study_manager:
@@ -66,17 +67,18 @@ class SentenceMiningView(ttk.Frame):
 
     def setup_ui(self):
         # 1. Top Bar: Import Controls
-        top_bar = ttk.Frame(self, padding=5)
-        top_bar.pack(fill="x")
+        self.top_bar = ttk.Frame(self, padding=5)
+        if not self.embedded:
+            self.top_bar.pack(fill="x")
         
         self.var_filter = tk.StringVar(value="all")
         self.target_cat = tk.StringVar(value="Any")
         self.sort_mode = tk.StringVar(value="Order")
         
-        ttk.Button(top_bar, text="Import File...", command=self.import_file).pack(side="left", padx=5)
-        ttk.Button(top_bar, text="Paste Clipboard", command=self.import_clipboard).pack(side="left", padx=5)
+        ttk.Button(self.top_bar, text="Import File...", command=self.import_file).pack(side="left", padx=5)
+        ttk.Button(self.top_bar, text="Paste Clipboard", command=self.import_clipboard).pack(side="left", padx=5)
         
-        ttk.Button(top_bar, text="Manage Known Words", command=self.open_manager).pack(side="right", padx=5)
+        ttk.Button(self.top_bar, text="Manage Known Words", command=self.open_manager).pack(side="right", padx=5)
         
         # 2. Main Content
         # Use pack with expand=True to fill available space

@@ -12,7 +12,6 @@ from src.features.study_center.ui.grammar_book_view import GrammarBookViewFrame
 from src.features.study_center.ui.quiz_ui import QuizUIFrame
 from src.features.writing_lab.ui.writing_lab import WritingLabFrame
 from src.features.chat.ui.chat_dashboard import ChatDashboardFrame
-from src.features.mining.ui.mining_view import SentenceMiningView
 
 class StudyDashboardFrame(ttk.Frame):
     def __init__(self, parent, controller, study_manager: StudyManager, db: FlashcardDatabase):
@@ -59,11 +58,7 @@ class StudyDashboardFrame(ttk.Frame):
         self.quiz_tab = QuizUIFrame(self.notebook, self.controller, self.study_manager, self.db, embedded=True)
         self.notebook.add(self.quiz_tab, text=tr("tab_quiz", "📝 Quiz"))
 
-        # Tab 8: Sentence Mining
-        self.mining_tab = SentenceMiningView(self.notebook, self.db, study_manager=self.study_manager)
-        self.notebook.add(self.mining_tab, text=tr("tab_mining", "⛏️ Mining"))
-        
-        self.tabs = [self.stats_tab, self.words_tab, self.sentences_tab, self.grammar_tab, self.writing_tab, self.chat_tab, self.quiz_tab, self.mining_tab]
+        self.tabs = [self.stats_tab, self.words_tab, self.sentences_tab, self.grammar_tab, self.writing_tab, self.chat_tab, self.quiz_tab]
         
         # Bind Tab Shortcuts (Ctrl+1 to Ctrl+6)
         # Note: We bind to the parent because the frame itself might not have focus
@@ -72,7 +67,7 @@ class StudyDashboardFrame(ttk.Frame):
         
         # Actually, global binding checking for visibility is safer for Tkinter
         # but let's try binding to the notebook which should receive events when active
-        for i in range(1, 9):
+        for i in range(1, 8):
             self.controller.root.bind(f"<Control-Key-{i}>", self._make_tab_switcher(i-1), add="+")
         
         # Bind tab change event to call on_show on the newly selected tab

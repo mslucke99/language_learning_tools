@@ -9,6 +9,7 @@ vocabulary extraction.
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, scrolledtext
 import os
+import re
 from typing import Optional, Dict, List
 from datetime import datetime
 
@@ -19,6 +20,9 @@ from src.features.reader.reading_assistant import ReadingAssistant
 from src.features.reader.analytics_engine import AnalyticsEngine
 from src.features.reader.library import ReadingLibrary
 from src.features.reader.annotations import AnnotationManager
+from src.features.mining.ui.mining_view import SentenceMiningView
+from src.features.reader.embedding_worker import EmbeddingWorker
+from src.services.dictionary.dictionary_manager import DictionaryEngine
 
 
 class ReadingModeFrame(ttk.Frame):
@@ -38,6 +42,13 @@ class ReadingModeFrame(ttk.Frame):
         self.library = ReadingLibrary(db)
         self.annotation_manager = AnnotationManager(db)
         
+        # Local Dictionary Engine
+        self.dict_engine = DictionaryEngine()
+        
+        # Background worker for sentence embeddings
+        self.embedding_worker = EmbeddingWorker(db)
+        self.embedding_worker.start()
+        
         # State
         self.current_session_id = None
         self.current_content = None
@@ -46,6 +57,13 @@ class ReadingModeFrame(ttk.Frame):
     
     def setup_ui(self):
         """Set up the main UI with tabs for different reading mode features."""
+        # Main Header with Back Button (Global for all tabs)
+        from src.core.ui_utils import setup_standard_header
+        self.main_header = setup_standard_header(
+            self, tr("lbl_reading_mode", "Reading Mode"), 
+            back_cmd=self._go_back_to_dashboard
+        )
+        
         # Create notebook (tabbed interface)
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
@@ -65,7 +83,20 @@ class ReadingModeFrame(ttk.Frame):
         self.notebook.add(self.reading_tab, text=tr("lbl_reading", "📖 Read"))
         self._setup_reading_tab()
         
-        # Tab 4: Statistics
+        # Tab 4: Sentence Mining
+        self.mining_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.mining_tab, text=tr("lbl_mining", "⛏️ Mine Sentences"))
+        
+        # Sub-header for Mining Tab
+        mining_header = ttk.Frame(self.mining_tab)
+        mining_header.pack(fill="x", padx=5, pady=5)
+        ttk.Button(mining_header, text=tr("btn_back", "← Back to Library"), 
+                  command=lambda: self.notebook.select(1)).pack(side="left", padx=5)
+        
+        self.mining_view = SentenceMiningView(self.mining_tab, self.db, self.study_manager, embedded=True)
+        self.mining_view.pack(fill="both", expand=True)
+        
+        # Tab 5: Statistics
         self.stats_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.stats_tab, text=tr("lbl_statistics", "📊 Statistics"))
         self._setup_stats_tab()
@@ -266,8 +297,14 @@ class ReadingModeFrame(ttk.Frame):
     
     def _setup_stats_tab(self):
         """Set up the statistics tab."""
-        ttk.Label(self.stats_tab, text=tr("lbl_reading_statistics", "Reading Statistics"), 
-                 font=("Arial", 14, "bold")).pack(pady=10)
+        # Header for Stats Tab
+        stats_header = ttk.Frame(self.stats_tab)
+        stats_header.pack(fill="x", padx=5, pady=5)
+        ttk.Button(stats_header, text=tr("btn_back", "← Back to Library"), 
+                  command=lambda: self.notebook.select(1)).pack(side="left", padx=5)
+                  
+        ttk.Label(stats_header, text=tr("lbl_reading_statistics", "Reading Statistics"), 
+                 font=("Arial", 14, "bold")).pack(side="left", padx=20)
         
         # Aggregate stats
         stats_frame = ttk.LabelFrame(self.stats_tab, text=tr("lbl_overall_stats", "Overall Statistics"), padding=10)
@@ -330,7 +367,12 @@ class ReadingModeFrame(ttk.Frame):
         filename = filedialog.askopenfilename(
             title=tr("title_select_file", "Select a file to import"),
             filetypes=[
-                (tr("lbl_text_files", "Text Files"), "*.txt"),
+                (tr("lbl_all_supported", "All Supported Files"), "*.txt *.md *.html *.htm *.epub *.pdf *.docx"),
+                (tr("lbl_text_files", "Text Files"), "*.txt *.md"),
+                ("HTML", "*.html *.htm"),
+                ("EPUB", "*.epub"),
+                ("PDF", "*.pdf"),
+                ("Word", "*.docx"),
                 (tr("lbl_all_files", "All Files"), "*.*")
             ]
         )
@@ -479,11 +521,11 @@ class ReadingModeFrame(ttk.Frame):
                 text=f"Progress: {completion:.0f}% | Words: {session.get('word_count', 0)} | Difficulty: {session.get('difficulty_rating', 'unknown')}"
             )
             
-            # Display content
-            self.content_display.config(state="normal")
-            self.content_display.delete("1.0", "end")
-            self.content_display.insert("1.0", session.get('content', ''))
-            self.content_display.config(state="disabled")
+            # Populate Mining tab first so known words are loaded
+            self.mining_view.process_text(session.get('content', ''))
+            
+            # Display content interactively in Read tab
+            self._render_interactive_content(session.get('content', ''))
             
             # Update statistics
             self._update_session_stats(session_id)
@@ -509,6 +551,27 @@ class ReadingModeFrame(ttk.Frame):
         if messagebox.askyesno(tr("title_confirm", "Confirm"), 
                               tr("msg_confirm_delete", "Are you sure you want to delete this session?")):
             try:
+                # Get session info from tree
+                item = selection[0]
+                values = self.library_tree.item(item, "values")
+                title = values[0] if values else None
+                
+                if not title:
+                    return
+                
+                # Find the session ID by title
+                user_id = 1
+                sessions = self.library.get_all_sessions(user_id)
+                session_id = None
+                
+                for session in sessions:
+                    if session.get('title') == title:
+                        session_id = session.get('id')
+                        break
+                
+                if session_id:
+                    self.content_manager.delete_reading_session(session_id)
+                
                 self._refresh_library()
                 messagebox.showinfo(tr("title_success", "Success"), tr("msg_deleted", "Session deleted"))
             except Exception as e:
@@ -569,6 +632,263 @@ class ReadingModeFrame(ttk.Frame):
         
         # Switch back to library tab
         self.notebook.select(1)  # Library tab index
+
+    def _go_back_to_dashboard(self):
+        """Clean up and return to the main dashboard."""
+        if hasattr(self.controller, 'show_home'):
+            self._save_reading_progress()
+            self.controller.show_home()
+
+    def _render_interactive_content(self, content: str):
+        """Render text with clickable words and sentences, applying dynamic styling if enabled."""
+        from src.core.config import config
+        
+        self.content_display.config(state="normal")
+        self.content_display.delete("1.0", "end")
+        
+        # Map IDs to actual text data
+        self._interactive_map = {
+            'words': {},
+            'sentences': {}
+        }
+        
+        # Configure tags
+        self.content_display.tag_configure("clickable", foreground="black")
+        if config.enable_dynamic_styling:
+            self.content_display.tag_configure("known_word", foreground="green")
+            self.content_display.tag_configure("unknown_word", foreground="#D4AF37") # Gold
+            
+            # Difficulty Highlighting Tags (Subtle backgrounds)
+            self.content_display.tag_configure("i0", background="#e8f5e9")      # Very subtle green
+            self.content_display.tag_configure("i1", background="#fff3e0")      # Very subtle orange
+            self.content_display.tag_configure("i2plus", background="#ffebee")  # Very subtle red
+            
+        self.content_display.tag_configure("word_hover", background="lightblue")
+        self.content_display.tag_configure("sentence_hover", background="#f0f0f0")
+        
+        # Bind events
+        self.content_display.tag_bind("clickable", "<Button-1>", self._on_text_click)
+        self.content_display.tag_bind("clickable", "<Enter>", self._on_text_enter)
+        self.content_display.tag_bind("clickable", "<Leave>", self._on_text_leave)
+        
+        known_words = set()
+        ignored_words = set()
+        if config.enable_dynamic_styling and hasattr(self.mining_view, 'miner'):
+            # Use the miner's helpers to get the word sets for the current language
+            lang = self.mining_view.lang_code
+            known_words = self.mining_view.miner._load_known_vocabulary(lang)
+            ignored_words = self.mining_view.miner._load_ignored_vocabulary(lang)
+            
+        # Get sentences from parser to find boundaries
+        sentences = self.content_manager.parser.segment_sentences(content)
+        
+        # This is a simplified regex approach that handles basic word boundaries
+        # and non-word characters (spaces, punctuation).
+        word_pattern = re.compile(r'(\w+)|([^\w]+)', re.UNICODE)
+        
+        sentence_idx = 0
+        word_idx = 0
+        
+        # Use simple string search to track sentence spans for the whole text
+        # Since segment_sentences strips whitespace, we match loosely
+        current_sentence = sentences[sentence_idx] if sentences else None
+        sentence_accum = ""
+        
+        for match in word_pattern.finditer(content):
+            word = match.group(1)
+            non_word = match.group(2)
+            
+            tags = ["clickable"]
+            
+            if current_sentence:
+                sentence_tag = f"sen_{sentence_idx}"
+                tags.append(sentence_tag)
+                self._interactive_map['sentences'][sentence_tag] = current_sentence
+                
+                # Sentence Difficulty Highlighting
+                diff_tag = None
+                if config.enable_dynamic_styling and hasattr(self.mining_view, 'mining_result') and self.mining_view.mining_result:
+                    matching_s = next((s for s in self.mining_view.mining_result.sentences if s.text.strip() == current_sentence.strip()), None)
+                    if matching_s:
+                        if matching_s.level == 0:
+                            diff_tag = "i0"
+                        elif matching_s.level == 1:
+                            diff_tag = "i1"
+                        else:
+                            diff_tag = "i2plus"
+                
+                if word:
+                    word_tag = f"wrd_{word_idx}"
+                    tags.append(word_tag)
+                    self._interactive_map['words'][word_tag] = word
+                    word_idx += 1
+                    
+                    if config.enable_dynamic_styling:
+                        word_lower = word.lower()
+                        # Check if it's a number/punctuation or in the known/ignored sets
+                        is_non_word = not any(c.isalpha() for c in word)
+                        
+                        if word_lower in known_words or word_lower in ignored_words or is_non_word:
+                            tags.append("known_word")
+                        else:
+                            tags.append("unknown_word")
+                    
+                    if diff_tag:
+                        tags.append(diff_tag)
+                        
+                    self.content_display.insert("end", word, tuple(tags))
+                    sentence_accum += word
+                elif non_word:
+                    if diff_tag:
+                        tags.append(diff_tag)
+                    self.content_display.insert("end", non_word, tuple(tags))
+                    sentence_accum += non_word
+                
+            # Check if we've completed the current sentence
+            if current_sentence and current_sentence.strip() in sentence_accum.strip():
+                sentence_idx += 1
+                current_sentence = sentences[sentence_idx] if sentence_idx < len(sentences) else None
+                sentence_accum = ""
+                
+        self.content_display.config(state="disabled")
+
+    def _on_text_enter(self, event):
+        """Highlight word or sentence on hover."""
+        index = self.content_display.index(f"@{event.x},{event.y}")
+        tags = self.content_display.tag_names(index)
+        
+        # Highlight word
+        for tag in tags:
+            if tag.startswith("wrd_"):
+                self.content_display.tag_add("word_hover", f"{tag}.first", f"{tag}.last")
+                break
+
+    def _on_text_leave(self, event):
+        """Remove highlight on leave."""
+        self.content_display.tag_remove("word_hover", "1.0", "end")
+
+    def _on_text_click(self, event):
+        """Handle clicking a word or sentence."""
+        index = self.content_display.index(f"@{event.x},{event.y}")
+        tags = self.content_display.tag_names(index)
+        
+        clicked_word = None
+        clicked_word_tag = None
+        clicked_sentence = None
+        
+        for tag in tags:
+            if tag.startswith("wrd_"):
+                clicked_word = self._interactive_map['words'].get(tag)
+                clicked_word_tag = tag
+            elif tag.startswith("sen_"):
+                clicked_sentence = self._interactive_map['sentences'].get(tag)
+                
+        if clicked_word:
+            self._show_interactive_popup(event.x_root, event.y_root, clicked_word, clicked_sentence, clicked_word_tag)
+
+    def _show_interactive_popup(self, x, y, word, sentence, word_tag):
+        """Show an inline popup for word definition and study actions."""
+        popup = tk.Menu(self, tearoff=0)
+        
+        # 1. Local dictionary lookup (Fast)
+        lang_code = self.study_manager.study_language
+        try:
+            results = self.dict_engine.lookup(word.lower(), lang_code)
+            if results:
+                # Use the first definition for the summary line
+                first_res = results[0]
+                def_text = first_res['definitions'][0] if first_res['definitions'] else "No definition found"
+                if len(def_text) > 40:
+                    def_text = def_text[:37] + "..."
+                popup.add_command(label=f"📖 {word}: {def_text}", state="disabled")
+            else:
+                # Fallback to ReadingAssistant (may use LLM)
+                definition = self.reading_assistant.get_word_definition(
+                    word=word,
+                    sentence_context=sentence or "",
+                    paragraph_context="",
+                    language=lang_code
+                )
+                def_text = definition.get('definition', 'No definition found')
+                if len(def_text) > 40:
+                    def_text = def_text[:37] + "..."
+                popup.add_command(label=f"📖 {word} (fallback): {def_text}", state="disabled")
+        except Exception as e:
+            print(f"Lookup error: {e}")
+            
+        popup.add_separator()
+
+        # 2. Vocabulary Actions
+        popup.add_command(
+            label="✓ Mark as Known", 
+            command=lambda: self._add_specific_item_to_study(word, "mark_known")
+        )
+        popup.add_command(
+            label="➕ Add Word to Study", 
+            command=lambda: self._add_specific_item_to_study(word, "word", context=sentence)
+        )
+        
+        # 3. Sentence Actions
+        if sentence:
+            popup.add_separator()
+            popup.add_command(
+                label="➕ Add Sentence to Study", 
+                command=lambda: self._add_specific_item_to_study(sentence, "sentence")
+            )
+            
+        popup.tk_popup(x, y)
+
+    def _add_specific_item_to_study(self, item, item_type, context=None):
+        """Add a word or sentence to the study manager or mark as known."""
+        lang_code = self.study_manager.study_language
+        
+        try:
+            if item_type == "mark_known":
+                self.db.add_known_word(item, lang_code, source="reading_mode")
+                if hasattr(self.controller, 'show_status'):
+                    self.controller.show_status(f"Marked '{item}' as known.")
+                
+            elif item_type == "word":
+                self.db.add_imported_content(
+                    content_type="word",
+                    content=item,
+                    url="reading_mode",
+                    title="Reading Mode Import",
+                    language=lang_code,
+                    context=context or ""
+                )
+                if hasattr(self.controller, 'show_status'):
+                    self.controller.show_status(f"Added '{item}' to Study Center.")
+                
+            elif item_type == "sentence":
+                self.db.add_imported_content(
+                    content_type="sentence",
+                    content=item,
+                    url="reading_mode",
+                    title="Reading Mode Import",
+                    language=lang_code,
+                    tags="reading"
+                )
+                if hasattr(self.controller, 'show_status'):
+                    self.controller.show_status("Sentence added to Study Center.")
+
+            # Update styling if needed
+            if item_type in ["mark_known", "word"]:
+                # Notify mining view to refresh known set
+                if hasattr(self, 'mining_view'):
+                    self.mining_view.update_mining_levels()
+                
+                # Re-render interactive content to update tags/styling
+                # Note: self.content_display is the widget name
+                content = self.content_display.get("1.0", "end-1c")
+                
+                # Keep scroll position
+                yview = self.content_display.yview()
+                self._render_interactive_content(content)
+                self.content_display.yview_moveto(yview[0])
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to perform action: {e}")
     
     def _save_reading_progress(self):
         """Save the current reading progress to the database."""
@@ -676,7 +996,10 @@ Longest Streak: {stats.get('longest_streak', 0)} days
         """Called when frame is shown."""
         self._refresh_library()
         self._refresh_stats()
+        if hasattr(self, 'mining_view'):
+            self.mining_view.on_show()
     
     def on_hide(self):
         """Called when frame is hidden."""
-        pass
+        if hasattr(self, 'embedding_worker'):
+            self.embedding_worker.stop()

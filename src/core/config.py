@@ -18,6 +18,13 @@ class AppConfig:
     request_timeout: int = int(os.getenv("REQUEST_TIMEOUT", "120"))
     preload_on_startup: bool = os.getenv("PRELOAD_ON_STARTUP", "true").lower() == "true"
     
+    # Embedding settings
+    embedding_speed: str = os.getenv("EMBEDDING_SPEED", "slow")  # 'off', 'slow', 'fast'
+    embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
+    
+    # UI Features
+    enable_dynamic_styling: bool = os.getenv("ENABLE_DYNAMIC_STYLING", "true").lower() == "true"
+    
     # UI & Localization (Fallback defaults)
     ui_language: str = os.getenv("UI_LANGUAGE", "en")
     native_language: str = os.getenv("NATIVE_LANGUAGE", "English")

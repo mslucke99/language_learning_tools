@@ -78,6 +78,21 @@ def init_reader_tables(db_path: str = None):
     
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_story_templates_genre ON story_templates(genre)")
     
+    # Create sentence_embeddings table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sentence_embeddings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            sentence_text TEXT NOT NULL,
+            embedding_blob BLOB NOT NULL,
+            model_name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES reading_sessions(id) ON DELETE CASCADE
+        )
+    """)
+    print("  ✓ sentence_embeddings table created")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sentence_embeddings_session ON sentence_embeddings(session_id)")
+    
     conn.commit()
     conn.close()
     

@@ -797,7 +797,21 @@ class FlashcardDatabase:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_imported_content_difficulty ON imported_content(difficulty_score)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_imported_content_grammar ON imported_content(grammar_complexity)")
 
-        # 20. Sentence Mining: Create sentence_study_progress table
+        # 20. Create sentence_embeddings table for Reading & Mining
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sentence_embeddings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                sentence_text TEXT NOT NULL,
+                embedding_blob BLOB NOT NULL,
+                model_name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES reading_sessions(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sentence_embeddings_session ON sentence_embeddings(session_id)")
+
+        # 21. Sentence Mining: Create sentence_study_progress table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sentence_study_progress (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1426,6 +1440,46 @@ class FlashcardDatabase:
             "processed": processed_counts.get(True, 0),
             "unprocessed": processed_counts.get(False, 0)
         }
+
+    # ===== SENTENCE EMBEDDING METHODS =====
+
+    def add_sentence_embedding(self, session_id: int, sentence_text: str, embedding_blob: bytes, model_name: str):
+        """Store a sentence embedding for a reading session."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO sentence_embeddings (session_id, sentence_text, embedding_blob, model_name)
+            VALUES (?, ?, ?, ?)
+        """, (session_id, sentence_text, embedding_blob, model_name))
+        self.conn.commit()
+
+    def get_sentence_embeddings(self, session_id: int) -> list[dict]:
+        """Get all stored embeddings for a session."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT sentence_text, embedding_blob FROM sentence_embeddings WHERE session_id = ?", (session_id,))
+        return [{"text": row[0], "embedding": row[1]} for row in cursor.fetchall()]
+
+    def delete_sentence_embeddings(self, session_id: int):
+        """Manually clear embeddings for a session (e.g. to re-process)."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM sentence_embeddings WHERE session_id = ?", (session_id,))
+        self.conn.commit()
+
+    def get_sessions_needing_embeddings(self) -> list[int]:
+        """Get IDs of reading sessions that don't have any embeddings yet."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id FROM reading_sessions 
+            WHERE id NOT IN (SELECT DISTINCT session_id FROM sentence_embeddings)
+            ORDER BY created_at DESC
+        """)
+        return [row[0] for row in cursor.fetchall()]
+
+    def delete_reading_session(self, session_id: int) -> bool:
+        """Delete a reading session and all its progress/embeddings (cascade)."""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM reading_sessions WHERE id = ?", (session_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
     
     # ===== GRAMMAR FOLLOW-UP METHODS =====
     

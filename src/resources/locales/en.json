@@ -1,5 +1,7 @@
 {
     "app_title": "Language Learning Suite",
+    "lbl_reading_mode": "📖 Reading Mode",
+    "lbl_all_supported": "All Supported Files",
     "study_center": "Study Center",
     "btn_back": "Back",
     "btn_save": "Save",
