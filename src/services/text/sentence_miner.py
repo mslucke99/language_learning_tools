@@ -1,9 +1,11 @@
 import re
+import unicodedata
 from typing import List, Dict, Tuple, Optional, TYPE_CHECKING
 from src.core.database import FlashcardDatabase
 from src.services.text.tokenizer_service import TokenizerService, Token
 from src.services.dictionary.dictionary_manager import DictionaryEngine
 from src.services.text.grammar_extractor import GrammarExtractor
+import regex
 
 if TYPE_CHECKING:
     from src.services.text.sentence_difficulty import SentenceDifficultyScorer
@@ -198,50 +200,230 @@ class SentenceMiner:
             pass
             
         return False
+    
 
     def _split_sentences(self, text: str) -> List[str]:
         """
-        Robust sentence splitting for multiple languages.
-        Splits by newlines first, then by standard sentence terminators
-        ONLY if they are followed by whitespace or are at the end of a line.
-        This protects decimals (0.8), dates (2026.02.07), and URLs/emails.
+        Robust sentence splitting for multiple languages using Unicode-aware boundaries.
+        
+        Handles:
+        - Multiple languages including English, Chinese, Korean, Japanese, and European languages
+        - Proper newline handling (blank lines always break, single newlines depend on context)
+        - Simple abbreviations in English (Dr., Mr., Jan., etc.)
+        - Decimals and numbers (protected from false splits via negative lookbehind)
+        - CJK punctuation (。！？) which are unambiguous sentence terminators
+        
+        Known Limitations (edge cases to improve later):
+        - Complex multi-period abbreviations like "U.S.A.", "e.g.", "i.e." may split incorrectly
+        - Short fragments (1-2 chars ending with period from such abbreviations may merge incorrectly
+        - Dates in format YYYY.MM.DD may be affected by the digit lookbehind
+        - Some edge cases with mixed punctuation may produce unexpected results
+        - Very short texts without clear sentence boundaries may not split as expected
+        
+        Newline rules:
+        - Blank lines (2+ newlines) always separate paragraphs.
+        - A single newline is treated as a sentence boundary only if the previous
+          line ends with a terminator and the next line starts with a letter.
+        - Otherwise, single-newline breaks are merged as word-wrap.
+
+        Inline terminator splitting:
+        - ASCII terminators (.!?) split only when followed by whitespace + a
+          sentence-starting letter or end-of-text.
+        - Periods after digits are protected to avoid splitting decimals/dates.
+        - CJK terminators (。！？) always split because they are unambiguous.
+        - Simple abbreviations like Dr., Mr., Jan. are merged back after splitting.
         """
-        # 1. Normalize line endings
-        text = text.replace('\r\n', '\n')
+        if not text:
+            return []
+            
+        # Normalize line endings
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
         
-        # 2. Split by newlines first (treat lines as primary boundaries)
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        # Split into paragraphs on blank lines (always a boundary)
+        paragraphs = re.split(r'\n{2,}', text)
         
-        sentences = []
+        raw_sentences = []
         
-        # 3. Pattern: Greedy match for terminators, but only if followed by space or end of string.
-        # Capture group pattern: ([terminators])
-        pattern = r'([.!?。！？]+(?=\s|$))'
-        
-        for line in lines:
-            # Skip complex splitting if no terminators are even present
-            if not any(c in line for c in ".!?。！？"):
-                sentences.append(line)
+        for para in paragraphs:
+            if not para.strip():
                 continue
                 
-            chunks = re.split(pattern, line)
+            # Process each paragraph
+            para_sentences = self._split_paragraph(para)
+            raw_sentences.extend(para_sentences)
             
-            # re.split with one capture group -> [text, delim, text, delim, ..., text]
-            i = 0
-            while i < len(chunks) - 1:
-                # Combine text with following delimiter
-                combined = (chunks[i] + chunks[i+1]).strip()
-                if combined:
-                    sentences.append(combined)
-                i += 2
+        # Filter out empty sentences and strip whitespace
+        return [s.strip() for s in raw_sentences if s.strip()]
+
+    def _split_paragraph(self, paragraph: str) -> List[str]:
+        """Split a single paragraph into sentences."""
+        # Define sentence terminators for different language blocks
+        # Western: . ! ?
+        # Chinese/Japanese: 。 ！ ？
+        # Korean: 。 ！ ？ (though Korean often uses Western punctuation too)
+        SENTENCE_TERMINATORS = '.!?。！？'
+        
+        # Unicode property escapes for regex
+        # \p{L} = any letter
+        # \p{Nl} = letter-like numerals (like Roman numerals)
+        # \p{Pe}, \p{Pf} = close/open punctuation
+        # \p{Pi}, \p{Ps} = initial/final quote punctuation
+        # \p{Zs} = space separator
+        # \p{Zl} = line separator
+        # \p{Zp} = paragraph separator
+        
+        SENTENCE_STARTER = r'[\p{L}\p{Nl}]'  # Letters or letter-like numbers
+        SENTENCE_OPENERS = r'["\'\(\[\p{Pi}\p{Ps}]*'  # Opening quotes/brackets
+        SENTENCE_ENDERS = r'[\p{Pe}\p{Pf}"\']*'  # Closing quotes/brackets
+        
+        # Pattern to detect where sentences end
+        ENDS_SENTENCE_RE = regex.compile(
+            r'[' + regex.escape(SENTENCE_TERMINATORS) + r']' + SENTENCE_ENDERS + r'\s*$'
+        )
+        
+        # Pattern to detect where sentences start (after potential whitespace/openers)
+        STARTS_NEW_SENTENCE_RE = regex.compile(
+            r'^\s*' + SENTENCE_OPENERS + SENTENCE_STARTER
+        )
+        
+        # Common abbreviations that shouldn't trigger sentence splits
+        ABBREV_RE = regex.compile(
+            r'\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|approx|dept|est|vol|pp|fig|'
+            r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|'
+            r'Mon|Tue|Wed|Thu|Fri|Sat|Sun)\.?',
+            regex.IGNORECASE
+        )
+        
+        # --- Step 1: Handle explicit line breaks ---
+        lines = [ln.strip() for ln in paragraph.split('\n') if ln.strip()]
+        if not lines:
+            return []
+            
+        # Merge lines that are likely word-wrapped rather than sentence breaks
+        merged_lines = []
+        current_line = lines[0]
+        
+        for i in range(1, len(lines)):
+            next_line = lines[i]
+            # Check if current line ends with sentence terminator and next line starts with sentence starter
+            ends_with_terminator = bool(ENDS_SENTENCE_RE.search(current_line))
+            starts_with_starter = bool(STARTS_NEW_SENTENCE_RE.search(next_line))
+            
+            if ends_with_terminator and starts_with_starter:
+                # This is likely a real sentence break
+                merged_lines.append(current_line)
+                current_line = next_line
+            else:
+                # This is likely word-wrapping, merge with space
+                current_line = current_line + ' ' + next_line
                 
-            # Handle the last text chunk if it wasn't followed by a delimiter
-            if i < len(chunks):
-                last_chunk = chunks[i].strip()
-                if last_chunk:
-                    sentences.append(last_chunk)
+        merged_lines.append(current_line)
+        
+            # --- Step 2: Split each merged line on inline terminators ---
+        all_candidates = []
+        
+        for block in merged_lines:
+            if not any(c in block for c in SENTENCE_TERMINATORS):
+                # No terminators, treat as one sentence
+                all_candidates.append(block)
+                continue
+                
+            # Split on sentence terminators
+            # We want to split on:
+            # 1. Western terminators (.!?) when followed by whitespace + sentence starter OR end of text
+            # 2. CJK terminators (。！？) always (they're unambiguous)
+            # But protect against splits after digits (decimals, etc.)
+            
+            # Pattern explanation:
+            # (?<!\d) - not preceded by digit (protect decimals)
+            # ([.!?][\p{Pe}\p{Pf}"\']*) - Western terminator with optional closing punctuation
+            # (?=\s*(?:' + SENTENCE_OPENERS + SENTENCE_STARTER + r')|\s*$) - followed by optional whitespace + opener+starter OR end
+            # | - OR
+            # ([。！？]) - CJK terminator (always split)
+            SPLIT_PATTERN = regex.compile(
+                r'(?<!\d)([.!?][\p{Pe}\p{Pf}"\']*)(?=\s*(?:' + SENTENCE_OPENERS + SENTENCE_STARTER + r')|\s*$)' +
+                r'|([。！？])'
+            )
+            
+            # Find all matches and their positions
+            matches = list(SPLIT_PATTERN.finditer(block))
+            if not matches:
+                # No matches, treat as one sentence
+                all_candidates.append(block)
+                continue
+                
+            # Split the block based on match positions
+            candidates = []
+            start = 0
+            for match in matches:
+                # Add text before the match
+                if start < match.start():
+                    sentence_part = block[start:match.start()].strip()
+                    if sentence_part:
+                        candidates.append(sentence_part)
+                
+                # Add the matched delimiter (the terminator)
+                sentence_part = match.group(0).strip()
+                if sentence_part:
+                    candidates.append(sentence_part)
                     
-        return sentences
+                start = match.end()
+            
+            # Add remaining text after last match
+            if start < len(block):
+                sentence_part = block[start:].strip()
+                if sentence_part:
+                    candidates.append(sentence_part)
+            
+            # Now we need to merge text parts with their following delimiters
+            # Since we split on delimiters, the pattern is: [text, delimiter, text, delimiter, ...]
+            # We want to merge each text with its following delimiter
+            merged_candidates = []
+            i = 0
+            while i < len(candidates):
+                text_part = candidates[i]
+                # Check if next item is a delimiter (punctuation)
+                if i + 1 < len(candidates) and regex.match(r'^[.!?。！？]+[\p{Pe}\p{Pf}"\']*$', candidates[i + 1]):
+                    # Merge text with its delimiter
+                    merged = (text_part + candidates[i + 1]).strip()
+                    if merged:
+                        merged_candidates.append(merged)
+                    i += 2  # Skip both text and delimiter
+                else:
+                    # No following delimiter, just add the text part
+                    if text_part:
+                        merged_candidates.append(text_part)
+                    i += 1
+            
+            all_candidates.extend(merged_candidates)
+            
+        # --- Step 3: Merge back abbreviations and very short fragments that were incorrectly split ---
+        final_sentences = []
+        i = 0
+        while i < len(all_candidates):
+            candidate = all_candidates[i]
+            
+            # Check if this ends with an abbreviation and there's a next candidate
+            is_abbreviation = (i + 1 < len(all_candidates) and 
+                              ABBREV_RE.search(candidate) and 
+                              not candidate.endswith('..'))  # Avoid double dots
+            
+            # Also check if this is a very short fragment (likely part of abbreviated text like "U.", "S.", etc.)
+            # Very short fragments ending with period are often incorrectly split abbreviations
+            is_short_fragment = (len(candidate.strip()) <= 2 and 
+                                candidate.strip().endswith('.') and
+                                i + 1 < len(all_candidates))
+            
+            if is_abbreviation or is_short_fragment:
+                # Merge with next candidate
+                merged = candidate + ' ' + all_candidates[i + 1]
+                final_sentences.append(merged)
+                i += 2  # Skip both current and next items as they've been merged
+            else:
+                final_sentences.append(candidate)
+                i += 1  # Move to next item
+                
+        return final_sentences
 
     def _load_known_vocabulary(self, lang_code: str) -> set:
         """Load all known lemmas for a language into a fast lookup set."""
